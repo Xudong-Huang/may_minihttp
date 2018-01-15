@@ -1,24 +1,21 @@
 extern crate may;
 extern crate may_minihttp;
+#[macro_use]
 extern crate serde_json;
 
-use may_minihttp::{HttpServer, Request, Response};
-use serde_json::builder::ObjectBuilder;
+use std::io;
+use may_minihttp::{HttpServer, HttpService, Request, Response};
 
 struct Techempower;
 
-impl Service for Techempower {
+impl HttpService for Techempower {
     fn call(&self, req: Request) -> io::Result<Response> {
         let mut resp = Response::new();
 
         // Bare-bones router
         match req.path() {
             "/json" => {
-                let json = serde_json::to_string(&ObjectBuilder::new()
-                    .insert("message", "Hello, World!")
-                    .build())
-                    .unwrap();
-
+                let json = serde_json::to_string(&json!({"message": "Hello, World!"})).unwrap();
                 resp.header("Content-Type", "application/json").body(&json);
             }
             "/plaintext" => {
@@ -36,6 +33,6 @@ impl Service for Techempower {
 
 fn main() {
     may::config().set_io_workers(4);
-    let server = HttpServer(StatusService).start("0.0.0.0:8080").unwrap();
+    let server = HttpServer(Techempower).start("0.0.0.0:8080").unwrap();
     server.join().unwrap();
 }

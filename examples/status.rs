@@ -1,12 +1,13 @@
 extern crate env_logger;
+extern crate may_minihttp;
 
 use std::io;
 
-use may_minihttp::{HttpServer, Request, Response};
+use may_minihttp::{HttpServer, HttpService, Request, Response};
 
 struct StatusService;
 
-impl Service for StatusService {
+impl HttpService for StatusService {
     fn call(&self, _request: Request) -> io::Result<Response> {
         let (code, message) = match _request.path() {
             "/200" => (200, "OK"),
