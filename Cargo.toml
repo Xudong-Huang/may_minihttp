@@ -6,6 +6,8 @@ license = "MIT/Apache-2.0"
 
 [dependencies]
 bytes = "0.4"
+co_managed = { git = "https://github.com/Xudong-Huang/co_managed.git" }
+may = { git = "https://github.com/Xudong-Huang/may.git" }
 httparse = "1"
 log = "0.4"
 time = "0.1"

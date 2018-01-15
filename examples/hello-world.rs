@@ -1,8 +1,7 @@
 extern crate env_logger;
 
 use std::io;
-
-use may_minihttp::{Http, Request, Response};
+use may_minihttp::{HttpServer, Request, Response};
 
 /// `HelloWorld` is the *service* that we're going to be implementing to service
 /// the HTTP requests we receive.
@@ -18,7 +17,7 @@ impl Service for HelloWorld {
 }
 
 fn main() {
-    drop(env_logger::init());
-    let addr = "0.0.0.0:8080".parse().unwrap();
-    TcpServer::new(Http, addr).serve(|| Ok(HelloWorld));
+    env_logger::init();
+    let server = HttpServer(HelloWorld).start("0.0.0.0:8080").unwrap();
+    server.join().unwrap();
 }

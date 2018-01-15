@@ -1,32 +1,35 @@
 extern crate bytes;
+extern crate co_managed;
 extern crate httparse;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate may;
 extern crate time;
 
 mod date;
 mod request;
 mod response;
-
-use std::io;
+mod http_server;
 
 pub use request::Request;
 pub use response::Response;
+pub use http_server::HttpServer;
 
-use bytes::BytesMut;
+// use std::io;
+// use bytes::BytesMut;
 
-// this is a kind of server
-pub struct Http;
+// pub struct HttpCodec;
 
-pub struct HttpCodec;
+// impl Decoder for HttpCodec {
+//     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Request>> {
+//         request::decode(buf)
+//     }
+// }
 
-impl Decoder for HttpCodec {
-    fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Request>> {
-        request::decode(buf)
-    }
-}
-
-impl Encoder for HttpCodec {
-    fn encode(&mut self, msg: Response, buf: &mut BytesMut) -> io::Result<()> {
-        response::encode(msg, buf);
-        Ok(())
-    }
-}
+// impl Encoder for HttpCodec {
+//     fn encode(&mut self, msg: Response, buf: &mut BytesMut) -> io::Result<()> {
+//         response::encode(msg, buf);
+//         Ok(())
+//     }
+// }

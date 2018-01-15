@@ -1,25 +1,14 @@
-extern crate futures;
-extern crate num_cpus;
+extern crate may;
+extern crate may_minihttp;
 extern crate serde_json;
-extern crate tokio_minihttp;
-extern crate tokio_proto;
-extern crate tokio_service;
 
-use futures::future;
-use tokio_service::Service;
-use tokio_proto::TcpServer;
-use tokio_minihttp::{Http, Request, Response};
+use may_minihttp::{HttpServer, Request, Response};
 use serde_json::builder::ObjectBuilder;
 
 struct Techempower;
 
 impl Service for Techempower {
-    type Request = Request;
-    type Response = Response;
-    type Error = std::io::Error;
-    type Future = future::Ok<Response, std::io::Error>;
-
-    fn call(&self, req: Request) -> Self::Future {
+    fn call(&self, req: Request) -> io::Result<Response> {
         let mut resp = Response::new();
 
         // Bare-bones router
@@ -41,13 +30,12 @@ impl Service for Techempower {
             }
         }
 
-        future::ok(resp)
+        Ok(resp)
     }
 }
 
 fn main() {
-    let addr = "0.0.0.0:8080".parse().unwrap();
-    let mut srv = TcpServer::new(Http, addr);
-    srv.threads(num_cpus::get());
-    srv.serve(|| Ok(Techempower))
+    may::config().set_io_workers(4);
+    let server = HttpServer(StatusService).start("0.0.0.0:8080").unwrap();
+    server.join().unwrap();
 }
