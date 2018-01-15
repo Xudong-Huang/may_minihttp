@@ -3,7 +3,6 @@ use std::net::ToSocketAddrs;
 use std::sync::Arc;
 
 use bytes::{BufMut, BytesMut};
-use co_managed::Manager;
 use may::coroutine;
 use may::net::TcpListener;
 
@@ -36,11 +35,10 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
             coroutine::Builder::new().name("TcpServer".to_owned()),
             move || {
                 let server = Arc::new(self);
-                let manager = Manager::new();
                 for stream in listener.incoming() {
                     let mut stream = t!(stream);
                     let server = server.clone();
-                    manager.add(move |_| {
+                    go!(move || {
                         let mut buf = BytesMut::with_capacity(512);
                         loop {
                             match request::decode(&mut buf) {
@@ -68,6 +66,7 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
                                     }
                                 }
                                 Ok(Some(req)) => {
+                                    // TODO: deal with errors
                                     let ret = server.0.call(req).unwrap();
 
                                     let mut rsp = BytesMut::with_capacity(512);

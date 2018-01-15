@@ -1,5 +1,4 @@
 extern crate bytes;
-extern crate co_managed;
 extern crate httparse;
 #[macro_use]
 extern crate log;
