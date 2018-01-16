@@ -1,3 +1,5 @@
+//! http server implementation on top of `MAY`
+
 use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
@@ -10,11 +12,16 @@ use may::net::TcpListener;
 use request::{self, Request};
 use response::{self, Response};
 
+/// the http service trait
+/// user code should supply a type that impl the `call` method for the http server
+///
 pub trait HttpService {
     fn call(&self, _request: Request) -> io::Result<Response>;
 }
 
-// this is a kind of server
+/// this is the generic type http server
+/// with a type parameter that impl `HttpService` trait
+///
 pub struct HttpServer<T>(pub T);
 
 macro_rules! t {
@@ -27,7 +34,7 @@ macro_rules! t {
     })
 }
 
-fn innernal_error_rsp(e: io::Error) -> Response {
+fn internal_error_rsp(e: io::Error) -> Response {
     error!("error in service: err = {:?}", e);
     let mut err_rsp = Response::new();
     err_rsp.status_code(500, "Internal Server Error");
@@ -79,7 +86,7 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
                                     let ret = server
                                         .0
                                         .call(req)
-                                        .unwrap_or_else(|e| innernal_error_rsp(e));
+                                        .unwrap_or_else(internal_error_rsp);
                                     response::encode(ret, &mut rsp);
 
                                     // send the result back to client
