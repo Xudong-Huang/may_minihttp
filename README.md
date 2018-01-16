@@ -14,7 +14,7 @@ First, add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-may_minihttp = "0.1"
+may_minihttp = { git = "https://github.com/Xudong-Huang/may_minihttp.git" }
 ```
 
 Then just simply implement your http service
@@ -45,6 +45,7 @@ fn main() {
 
 ## Performance
 Tested with only one working thread on my laptop
+
 Both with the following command to start the server.
 ```
 $ cargo run --example=hello-world --release
