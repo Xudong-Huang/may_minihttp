@@ -33,6 +33,6 @@ impl HttpService for Techempower {
 
 fn main() {
     may::config().set_io_workers(4);
-    let server = HttpServer(Techempower).start("0.0.0.0:8080").unwrap();
+    let server = HttpServer(Techempower).start("127.0.0.1:8080").unwrap();
     server.join().unwrap();
 }

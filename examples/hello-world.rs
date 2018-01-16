@@ -21,6 +21,6 @@ impl HttpService for HelloWorld {
 fn main() {
     may::config().set_io_workers(1);
     drop(env_logger::init());
-    let server = HttpServer(HelloWorld).start("0.0.0.0:8080").unwrap();
+    let server = HttpServer(HelloWorld).start("127.0.0.1:8080").unwrap();
     server.join().unwrap();
 }
