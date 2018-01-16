@@ -1,0 +1,14 @@
+language: rust
+sudo: false
+
+os:
+ - linux
+
+rust:
+  - stable
+
+evn:
+  - RUST_BACKTRACE=1
+
+script:
+  - cargo bulid
