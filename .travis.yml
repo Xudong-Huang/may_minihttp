@@ -11,4 +11,4 @@ evn:
   - RUST_BACKTRACE=1
 
 script:
-  - cargo bulid
+  - cargo build
