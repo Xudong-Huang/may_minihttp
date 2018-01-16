@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -26,6 +27,14 @@ macro_rules! t {
     })
 }
 
+fn innernal_error_rsp(e: io::Error) -> Response {
+    error!("error in service: err = {:?}", e);
+    let mut err_rsp = Response::new();
+    err_rsp.status_code(500, "Internal Server Error");
+    err_rsp.body(e.description());
+    err_rsp
+}
+
 impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
     /// Spawns the http service, binding to the given address
     /// return a coroutine that you can cancel it when need to stop the service
@@ -40,6 +49,7 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
                     let server = server.clone();
                     go!(move || {
                         let mut buf = BytesMut::with_capacity(512);
+                        let mut rsp = BytesMut::with_capacity(512);
                         loop {
                             match request::decode(&mut buf) {
                                 Ok(None) => {
@@ -66,16 +76,18 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
                                     }
                                 }
                                 Ok(Some(req)) => {
-                                    // TODO: deal with errors
-                                    let ret = server.0.call(req).unwrap();
-
-                                    let mut rsp = BytesMut::with_capacity(512);
+                                    let ret = server
+                                        .0
+                                        .call(req)
+                                        .unwrap_or_else(|e| innernal_error_rsp(e));
                                     response::encode(ret, &mut rsp);
 
                                     // send the result back to client
                                     stream
                                         .write_all(rsp.as_ref())
                                         .unwrap_or_else(|e| error!("send rsp failed: err={:?}", e));
+
+                                    rsp.clear();
                                 }
                                 Err(ref e) => {
                                     error!("error decode req: err = {:?}", e);
