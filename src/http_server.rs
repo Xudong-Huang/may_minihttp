@@ -5,11 +5,10 @@ use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 
-use bytes::{BufMut, BytesMut};
 use may::coroutine;
 use may::net::TcpListener;
-
 use request::{self, Request};
+use bytes::{BufMut, BytesMut};
 use response::{self, Response};
 
 /// the http service trait
@@ -25,6 +24,21 @@ pub trait HttpService {
 pub struct HttpServer<T>(pub T);
 
 macro_rules! t {
+    ($e: expr) => (match $e {
+        Ok(val) => val,
+        Err(ref err) if err.kind() == io::ErrorKind::ConnectionReset ||
+                        err.kind() == io::ErrorKind::UnexpectedEof=> {
+            // info!("http server read req: connection closed");
+            return;
+        }
+        Err(err) => {
+            error!("call = {:?}\nerr = {:?}", stringify!($e), err);
+            return;
+        }
+    })
+}
+
+macro_rules! t_c {
     ($e: expr) => (match $e {
         Ok(val) => val,
         Err(err) => {
@@ -52,52 +66,35 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
             move || {
                 let server = Arc::new(self);
                 for stream in listener.incoming() {
-                    let mut stream = t!(stream);
+                    let mut stream = t_c!(stream);
                     let server = server.clone();
                     go!(move || {
                         let mut buf = BytesMut::with_capacity(512);
                         let mut rsp = BytesMut::with_capacity(512);
                         loop {
-                            match request::decode(&mut buf) {
-                                Ok(None) => {
+                            match t!(request::decode(&mut buf)) {
+                                None => {
                                     // need more data
-                                    let mut temp_buf = [0; 512];
-                                    match stream.read(&mut temp_buf) {
-                                        Ok(0) => return, // connection was closed
-                                        Ok(n) => {
-                                            buf.reserve(n);
-                                            buf.put_slice(&temp_buf[0..n]);
-                                        }
-                                        Err(err) => {
-                                            match err.kind() {
-                                                io::ErrorKind::UnexpectedEof
-                                                | io::ErrorKind::ConnectionReset => {
-                                                    info!("http server read req: connection closed")
-                                                }
-                                                _ => {
-                                                    error!("http server read req: err = {:?}", err)
-                                                }
-                                            }
-                                            return;
-                                        }
+                                    if buf.remaining_mut() < 256 {
+                                        buf.reserve(512);
                                     }
+                                    let n = {
+                                        let read_buf = unsafe { buf.bytes_mut() };
+                                        t!(stream.read(read_buf))
+                                    };
+                                    if n == 0 {
+                                        //connection was closed
+                                        return;
+                                    }
+                                    unsafe { buf.advance_mut(n) };
                                 }
-                                Ok(Some(req)) => {
-                                    let ret = server
-                                        .0
-                                        .call(req)
-                                        .unwrap_or_else(internal_error_rsp);
+                                Some(req) => {
+                                    let ret = server.0.call(req).unwrap_or_else(internal_error_rsp);
                                     response::encode(ret, &mut rsp);
 
                                     // send the result back to client
-                                    stream
-                                        .write_all(rsp.as_ref())
-                                        .unwrap_or_else(|e| error!("send rsp failed: err={:?}", e));
-
+                                    t!(stream.write_all(rsp.as_ref()));
                                     rsp.clear();
-                                }
-                                Err(ref e) => {
-                                    error!("error decode req: err = {:?}", e);
                                 }
                             }
                         }

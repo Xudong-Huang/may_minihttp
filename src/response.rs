@@ -1,6 +1,6 @@
 use std::fmt::{self, Write};
 
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 
 pub struct Response {
     headers: Vec<(String, String)>,
@@ -42,54 +42,24 @@ pub fn encode(msg: Response, buf: &mut BytesMut) {
     let length = msg.response.len();
     let now = ::date::now();
 
+    buf.reserve(256 + length);
+
     write!(
-        FastWrite(buf),
+        buf,
         "\
          HTTP/1.1 {}\r\n\
          Server: Example\r\n\
          Content-Length: {}\r\n\
          Date: {}\r\n\
          ",
-        msg.status_message,
-        length,
-        now
+        msg.status_message, length, now
     ).unwrap();
 
     for &(ref k, ref v) in &msg.headers {
-        push(buf, k.as_bytes());
-        push(buf, ": ".as_bytes());
-        push(buf, v.as_bytes());
-        push(buf, "\r\n".as_bytes());
+        write!(buf, "{}: {}\r\n", k, v).unwrap();
     }
 
-    push(buf, "\r\n".as_bytes());
-    push(buf, msg.response.as_bytes());
-}
-
-fn push(buf: &mut BytesMut, data: &[u8]) {
-    buf.reserve(data.len());
-    unsafe {
-        buf.bytes_mut()[..data.len()].copy_from_slice(data);
-        buf.advance_mut(data.len());
-    }
-}
-
-// TODO: impl fmt::Write for Vec<u8>
-//
-// Right now `write!` on `Vec<u8>` goes through io::Write and is not super
-// speedy, so inline a less-crufty implementation here which doesn't go through
-// io::Error.
-struct FastWrite<'a>(&'a mut BytesMut);
-
-impl<'a> fmt::Write for FastWrite<'a> {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        push(&mut *self.0, s.as_bytes());
-        Ok(())
-    }
-
-    fn write_fmt(&mut self, args: fmt::Arguments) -> fmt::Result {
-        fmt::write(self, args)
-    }
+    write!(buf, "\r\n{}", msg.response).unwrap();
 }
 
 impl fmt::Display for StatusMessage {
