@@ -9,7 +9,11 @@ bytes = "0.4"
 may = { git = "https://github.com/Xudong-Huang/may.git" }
 httparse = "1"
 log = "0.4"
+sequencer = { git = "https://github.com/Xudong-Huang/Sequencer.git" }
 time = "0.1"
+
+[replace]
+"generator:0.6.5" = { git = "https://github.com/Xudong-Huang/generator-rs.git", branch = "libfringe" }
 
 [dev-dependencies]
 env_logger = "0.4"

@@ -4,6 +4,7 @@ extern crate httparse;
 extern crate log;
 #[macro_use]
 extern crate may;
+extern crate sequencer;
 extern crate time;
 
 mod date;
@@ -13,4 +14,4 @@ mod http_server;
 
 pub use request::Request;
 pub use response::Response;
-pub use http_server::{HttpServer, HttpService};
+pub use http_server::{HttpPipelineServer, HttpServer, HttpService};
