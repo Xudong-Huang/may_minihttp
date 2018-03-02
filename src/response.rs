@@ -37,9 +37,8 @@ impl Response {
         self
     }
 
-    pub fn body_bytes(&mut self, b: &[u8]) -> &mut Response {
-        self.response = b.to_vec();
-        self
+    pub fn body_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.response
     }
 }
 

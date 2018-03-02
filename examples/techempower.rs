@@ -15,8 +15,9 @@ impl HttpService for Techempower {
         // Bare-bones router
         match req.path() {
             "/json" => {
-                let json = serde_json::to_string(&json!({"message": "Hello, World!"})).unwrap();
-                resp.header("Content-Type", "application/json").body(&json);
+                resp.header("Content-Type", "application/json");
+                *resp.body_mut() =
+                    serde_json::to_vec(&json!({"message": "Hello, World!"})).unwrap();
             }
             "/plaintext" => {
                 resp.header("Content-Type", "text/plain")
