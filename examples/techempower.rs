@@ -3,8 +3,8 @@ extern crate may_minihttp;
 #[macro_use]
 extern crate serde_json;
 
-use std::io;
 use may_minihttp::{HttpServer, HttpService, Request, Response};
+use std::io;
 
 struct Techempower;
 

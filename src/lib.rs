@@ -7,10 +7,10 @@ extern crate may;
 extern crate time;
 
 mod date;
+mod http_server;
 mod request;
 mod response;
-mod http_server;
 
+pub use http_server::{HttpServer, HttpService};
 pub use request::Request;
 pub use response::Response;
-pub use http_server::{HttpServer, HttpService};

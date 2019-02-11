@@ -24,7 +24,7 @@ impl HttpService for StatusService {
 }
 
 fn main() {
-    drop(env_logger::init());
+    env_logger::init();
     let server = HttpServer(StatusService).start("127.0.0.1:8080").unwrap();
     server.join().unwrap();
 }

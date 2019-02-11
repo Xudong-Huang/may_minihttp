@@ -2,8 +2,8 @@ extern crate env_logger;
 extern crate may;
 extern crate may_minihttp;
 
-use std::io;
 use may_minihttp::{HttpServer, HttpService, Request, Response};
+use std::io;
 
 /// `HelloWorld` is the *service* that we're going to be implementing to service
 /// the HTTP requests we receive.
@@ -20,7 +20,7 @@ impl HttpService for HelloWorld {
 
 fn main() {
     may::config().set_io_workers(1);
-    drop(env_logger::init());
+    env_logger::init();
     let server = HttpServer(HelloWorld).start("127.0.0.1:8080").unwrap();
     server.wait();
 }

@@ -57,7 +57,8 @@ pub fn encode(msg: Response, buf: &mut BytesMut) {
         msg.status_message,
         length,
         now
-    ).unwrap();
+    )
+    .unwrap();
 
     for &(ref k, ref v) in &msg.headers {
         push(buf, k.as_bytes());

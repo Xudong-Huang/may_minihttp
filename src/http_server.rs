@@ -1,15 +1,15 @@
 //! http server implementation on top of `MAY`
 
-use std::sync::Arc;
-use std::error::Error;
-use std::net::ToSocketAddrs;
 use std::collections::VecDeque;
+use std::error::Error;
 use std::io::{self, Read, Write};
+use std::net::ToSocketAddrs;
+use std::sync::Arc;
 
+use bytes::{BufMut, BytesMut};
 use may::coroutine;
 use may::net::TcpListener;
 use request::{self, Request};
-use bytes::{BufMut, BytesMut};
 use response::{self, Response};
 
 /// the http service trait
@@ -20,28 +20,34 @@ pub trait HttpService {
 }
 
 macro_rules! t {
-    ($e: expr) => (match $e {
-        Ok(val) => val,
-        Err(ref err) if err.kind() == io::ErrorKind::ConnectionReset ||
-                        err.kind() == io::ErrorKind::UnexpectedEof=> {
-            // info!("http server read req: connection closed");
-            return;
+    ($e: expr) => {
+        match $e {
+            Ok(val) => val,
+            Err(ref err)
+                if err.kind() == io::ErrorKind::ConnectionReset
+                    || err.kind() == io::ErrorKind::UnexpectedEof =>
+            {
+                // info!("http server read req: connection closed");
+                return;
+            }
+            Err(err) => {
+                error!("call = {:?}\nerr = {:?}", stringify!($e), err);
+                return;
+            }
         }
-        Err(err) => {
-            error!("call = {:?}\nerr = {:?}", stringify!($e), err);
-            return;
-        }
-    })
+    };
 }
 
 macro_rules! t_c {
-    ($e: expr) => (match $e {
-        Ok(val) => val,
-        Err(err) => {
-            error!("call = {:?}\nerr = {:?}", stringify!($e), err);
-            continue;
+    ($e: expr) => {
+        match $e {
+            Ok(val) => val,
+            Err(err) => {
+                error!("call = {:?}\nerr = {:?}", stringify!($e), err);
+                continue;
+            }
         }
-    })
+    };
 }
 
 fn internal_error_rsp(e: io::Error) -> Response {

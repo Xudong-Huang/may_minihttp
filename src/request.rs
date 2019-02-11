@@ -91,7 +91,8 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
         version: version,
         headers: headers,
         data: buf.split_to(amt),
-    }.into())
+    }
+    .into())
 }
 
 impl<'req> Iterator for RequestHeaders<'req> {
