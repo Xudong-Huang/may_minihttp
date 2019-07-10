@@ -4,6 +4,7 @@ extern crate httparse;
 extern crate log;
 #[macro_use]
 extern crate may;
+extern crate smallvec;
 extern crate time;
 
 mod date;

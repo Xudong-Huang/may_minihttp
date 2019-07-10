@@ -1,6 +1,5 @@
 //! http server implementation on top of `MAY`
 
-use std::collections::VecDeque;
 use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
@@ -23,14 +22,15 @@ macro_rules! t {
     ($e: expr) => {
         match $e {
             Ok(val) => val,
-            Err(ref err)
-                if err.kind() == io::ErrorKind::ConnectionReset
-                    || err.kind() == io::ErrorKind::UnexpectedEof =>
-            {
-                // info!("http server read req: connection closed");
-                return;
-            }
+            #[cold]
             Err(err) => {
+                if err.kind() == io::ErrorKind::ConnectionReset
+                    || err.kind() == io::ErrorKind::UnexpectedEof
+                {
+                    // info!("http server read req: connection closed");
+                    return;
+                }
+
                 error!("call = {:?}\nerr = {:?}", stringify!($e), err);
                 return;
             }
@@ -42,6 +42,7 @@ macro_rules! t_c {
     ($e: expr) => {
         match $e {
             Ok(val) => val,
+            #[cold]
             Err(err) => {
                 error!("call = {:?}\nerr = {:?}", stringify!($e), err);
                 continue;
@@ -76,31 +77,27 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
                     let mut stream = t_c!(stream);
                     let server = server.clone();
                     go!(move || {
-                        let mut buf = BytesMut::with_capacity(4096);
-                        let mut reqs = VecDeque::with_capacity(32);
+                        let mut buf = BytesMut::with_capacity(4096 * 4);
                         let mut rsps = BytesMut::with_capacity(4096);
                         loop {
                             // read the socket for reqs
                             if buf.remaining_mut() < 1024 {
-                                buf.reserve(4096);
+                                buf.reserve(4096 * 4);
                             }
+
                             let n = {
                                 let read_buf = unsafe { buf.bytes_mut() };
                                 t!(stream.read(read_buf))
                             };
                             //connection was closed
                             if n == 0 {
+                                #[cold]
                                 return;
                             }
                             unsafe { buf.advance_mut(n) };
 
                             // prepare the reqs
                             while let Some(req) = t!(request::decode(&mut buf)) {
-                                reqs.push_back(req);
-                            }
-
-                            // process the reqs
-                            while let Some(req) = reqs.pop_front() {
                                 let ret = server.0.call(req).unwrap_or_else(internal_error_rsp);
                                 response::encode(ret, &mut rsps);
                             }

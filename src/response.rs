@@ -1,9 +1,10 @@
 use std::fmt::{self, Write};
 
 use bytes::{BufMut, BytesMut};
+use smallvec::SmallVec;
 
 pub struct Response {
-    headers: Vec<(String, String)>,
+    headers: SmallVec<[(&'static str, &'static str); 16]>,
     response: Vec<u8>,
     status_message: StatusMessage,
 }
@@ -16,7 +17,7 @@ enum StatusMessage {
 impl Response {
     pub fn new() -> Response {
         Response {
-            headers: Vec::new(),
+            headers: SmallVec::new(),
             response: Vec::new(),
             status_message: StatusMessage::Ok,
         }
@@ -27,8 +28,8 @@ impl Response {
         self
     }
 
-    pub fn header(&mut self, name: &str, val: &str) -> &mut Response {
-        self.headers.push((name.to_string(), val.to_string()));
+    pub fn header(&mut self, name: &'static str, val: &'static str) -> &mut Response {
+        self.headers.push((name, val));
         self
     }
 
@@ -60,7 +61,7 @@ pub fn encode(msg: Response, buf: &mut BytesMut) {
     )
     .unwrap();
 
-    for &(ref k, ref v) in &msg.headers {
+    for (k, v) in msg.headers {
         push(buf, k.as_bytes());
         push(buf, ": ".as_bytes());
         push(buf, v.as_bytes());
@@ -71,11 +72,13 @@ pub fn encode(msg: Response, buf: &mut BytesMut) {
     push(buf, msg.response.as_slice());
 }
 
+#[inline]
 fn push(buf: &mut BytesMut, data: &[u8]) {
-    buf.reserve(data.len());
+    let len = data.len();
+    buf.reserve(len);
     unsafe {
-        buf.bytes_mut()[..data.len()].copy_from_slice(data);
-        buf.advance_mut(data.len());
+        buf.bytes_mut()[..len].copy_from_slice(data);
+        buf.advance_mut(len);
     }
 }
 
@@ -87,6 +90,7 @@ fn push(buf: &mut BytesMut, data: &[u8]) {
 struct FastWrite<'a>(&'a mut BytesMut);
 
 impl<'a> fmt::Write for FastWrite<'a> {
+    #[inline]
     fn write_str(&mut self, s: &str) -> fmt::Result {
         push(&mut *self.0, s.as_bytes());
         Ok(())

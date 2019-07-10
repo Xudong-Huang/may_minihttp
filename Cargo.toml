@@ -5,15 +5,16 @@ authors = ["Xudong Huang <huangxu008@hotmail.com>"]
 license = "MIT/Apache-2.0"
 
 [dependencies]
-bytes = "0.4"
-may = { git = "https://github.com/Xudong-Huang/may.git" }
-httparse = "1"
+may = "0.3"
 log = "0.4"
 time = "0.1"
+bytes = "0.4"
+httparse = "1"
+smallvec = "0.6"
 
 [dev-dependencies]
-env_logger = "0.6"
 serde_json = "1"
+env_logger = "0.6"
 
 [profile.release]
 lto = true
