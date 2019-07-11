@@ -91,7 +91,7 @@ pub fn encode(msg: Response, mut buf: &mut BytesMut) {
     buf.put_slice(msg.status_message.code.as_bytes());
     buf.put_u8(b' ');
     buf.put_slice(msg.status_message.msg.as_bytes());
-    buf.put_slice(b"\r\nServer: may-minihttp\r\nDate: ");
+    buf.put_slice(b"\r\nServer: may\r\nDate: ");
     ::date::now().put_bytes(buf);
     buf.put_slice(b"\r\nContent-Length: ");
     itoa::fmt(&mut buf, length).unwrap();
