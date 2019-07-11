@@ -54,8 +54,11 @@ macro_rules! t_c {
 fn internal_error_rsp(e: io::Error) -> Response {
     error!("error in service: err = {:?}", e);
     let mut err_rsp = Response::new();
-    err_rsp.status_code(500, "Internal Server Error");
-    err_rsp.body(e.description());
+    err_rsp.status_code("500", "Internal Server Error");
+    err_rsp
+        .body_mut()
+        .0
+        .extend_from_slice(e.description().as_bytes());
     err_rsp
 }
 
@@ -77,12 +80,12 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
                     let mut stream = t_c!(stream);
                     let server = server.clone();
                     go!(move || {
-                        let mut buf = BytesMut::with_capacity(4096 * 4);
-                        let mut rsps = BytesMut::with_capacity(4096);
+                        let mut buf = BytesMut::with_capacity(4096 * 8);
+                        let mut rsps = BytesMut::with_capacity(4096 * 8);
                         loop {
                             // read the socket for reqs
                             if buf.remaining_mut() < 1024 {
-                                buf.reserve(4096 * 4);
+                                buf.reserve(4096 * 8);
                             }
 
                             let n = {
@@ -95,6 +98,10 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
                                 return;
                             }
                             unsafe { buf.advance_mut(n) };
+
+                            if buf.remaining_mut() < 1024 {
+                                buf.reserve(4096 * 8);
+                            }
 
                             // prepare the reqs
                             while let Some(req) = t!(request::decode(&mut buf)) {

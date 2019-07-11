@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::fmt::{self, Write};
 use std::str;
 
+use bytes::BytesMut;
 use time::{self, Duration};
 
 pub struct Now;
@@ -53,9 +54,26 @@ impl fmt::Display for Now {
     }
 }
 
+impl Now {
+    pub fn put_bytes(&self, buf: &mut BytesMut) {
+        LAST.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let now = time::get_time();
+            if now > cache.next_update {
+                cache.update(now);
+            }
+            buf.extend_from_slice(cache.raw_buffer())
+        })
+    }
+}
+
 impl LastRenderedNow {
     fn buffer(&self) -> &str {
         str::from_utf8(&self.bytes[..self.amt]).unwrap()
+    }
+
+    fn raw_buffer(&self) -> &[u8] {
+        &self.bytes[..self.amt]
     }
 
     fn update(&mut self, now: time::Timespec) {

@@ -16,15 +16,14 @@ impl HttpService for Techempower {
         match req.path() {
             "/json" => {
                 resp.header("Content-Type", "application/json");
-                *resp.body_mut() =
-                    serde_json::to_vec(&json!({"message": "Hello, World!"})).unwrap();
+                serde_json::to_writer(resp.body_mut(), &json!({"message": "Hello, World!"}))?;
             }
             "/plaintext" => {
                 resp.header("Content-Type", "text/plain")
                     .body("Hello, World!");
             }
             _ => {
-                resp.status_code(404, "Not Found");
+                resp.status_code("404", "Not Found");
             }
         }
 

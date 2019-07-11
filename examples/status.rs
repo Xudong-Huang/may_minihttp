@@ -10,10 +10,10 @@ struct StatusService;
 impl HttpService for StatusService {
     fn call(&self, _request: Request) -> io::Result<Response> {
         let (code, message) = match _request.path() {
-            "/200" => (200, "OK"),
-            "/400" => (400, "Bad Request"),
-            "/500" => (500, "Internal Server Error"),
-            _ => (404, "Not Found"),
+            "/200" => ("200", "OK"),
+            "/400" => ("400", "Bad Request"),
+            "/500" => ("500", "Internal Server Error"),
+            _ => ("404", "Not Found"),
         };
 
         let mut resp = Response::new();

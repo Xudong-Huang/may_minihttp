@@ -1,85 +1,112 @@
-use std::fmt::{self, Write};
+use std::io;
 
 use bytes::{BufMut, BytesMut};
-use smallvec::SmallVec;
+use itoa;
 
 pub struct Response {
-    headers: SmallVec<[(&'static str, &'static str); 16]>,
-    response: Vec<u8>,
+    headers: [(&'static str, &'static str); 16],
+    headers_len: usize,
     status_message: StatusMessage,
+    body: Body,
 }
 
-enum StatusMessage {
-    Ok,
-    Custom(u32, String),
+enum Body {
+    SMsg(&'static str),
+    DMsg(BytesMut),
+}
+
+impl Body {
+    fn len(&self) -> usize {
+        match self {
+            Body::SMsg(s) => s.len(),
+            Body::DMsg(v) => v.len(),
+        }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Body::SMsg(s) => s.as_bytes(),
+            Body::DMsg(v) => &v,
+        }
+    }
+}
+
+struct StatusMessage {
+    code: &'static str,
+    msg: &'static str,
 }
 
 impl Response {
     pub fn new() -> Response {
         Response {
-            headers: SmallVec::new(),
-            response: Vec::new(),
-            status_message: StatusMessage::Ok,
+            headers: unsafe { std::mem::MaybeUninit::uninit().assume_init() },
+            headers_len: 0,
+            body: Body::DMsg(BytesMut::new()),
+            status_message: StatusMessage {
+                code: "200",
+                msg: "Ok",
+            },
         }
     }
 
-    pub fn status_code(&mut self, code: u32, message: &str) -> &mut Response {
-        self.status_message = StatusMessage::Custom(code, message.to_string());
+    pub fn status_code(&mut self, code: &'static str, msg: &'static str) -> &mut Response {
+        self.status_message = StatusMessage { code, msg };
         self
     }
 
     pub fn header(&mut self, name: &'static str, val: &'static str) -> &mut Response {
-        self.headers.push((name, val));
+        self.headers[self.headers_len] = (name, val);
+        self.headers_len += 1;
         self
     }
 
-    pub fn body(&mut self, s: &str) -> &mut Response {
-        self.response = s.as_bytes().to_vec();
+    pub fn body(&mut self, s: &'static str) -> &mut Response {
+        self.body = Body::SMsg(s);
         self
     }
 
-    pub fn body_mut(&mut self) -> &mut Vec<u8> {
-        &mut self.response
+    pub fn body_mut(&mut self) -> BodyWriter {
+        let buf = match self.body {
+            Body::DMsg(ref mut v) => return BodyWriter(v),
+            Body::SMsg(s) => {
+                let mut buf = BytesMut::new();
+                if !s.is_empty() {
+                    buf.extend_from_slice(s.as_bytes());
+                }
+                buf
+            }
+        };
+
+        self.body = Body::DMsg(buf);
+        match &mut self.body {
+            Body::DMsg(v) => BodyWriter(v),
+            Body::SMsg(_) => unreachable!(),
+        }
     }
 }
 
-pub fn encode(msg: Response, buf: &mut BytesMut) {
-    let length = msg.response.len();
-    let now = ::date::now();
+pub fn encode(msg: Response, mut buf: &mut BytesMut) {
+    let length = msg.body.len();
+    buf.put_slice(b"HTTP/1.1 ");
+    buf.put_slice(msg.status_message.code.as_bytes());
+    buf.put_u8(b' ');
+    buf.put_slice(msg.status_message.msg.as_bytes());
+    buf.put_slice(b"\r\nServer: may-minihttp\r\nDate: ");
+    ::date::now().put_bytes(buf);
+    buf.put_slice(b"\r\nContent-Length: ");
+    itoa::fmt(&mut buf, length).unwrap();
+    buf.put_slice(b"\r\n");
 
-    write!(
-        FastWrite(buf),
-        "\
-         HTTP/1.1 {}\r\n\
-         Server: Example\r\n\
-         Content-Length: {}\r\n\
-         Date: {}\r\n\
-         ",
-        msg.status_message,
-        length,
-        now
-    )
-    .unwrap();
-
-    for (k, v) in msg.headers {
-        push(buf, k.as_bytes());
-        push(buf, ": ".as_bytes());
-        push(buf, v.as_bytes());
-        push(buf, "\r\n".as_bytes());
+    for i in 0..msg.headers_len {
+        let (k, v) = msg.headers[i];
+        buf.put_slice(k.as_bytes());
+        buf.put_slice(b": ");
+        buf.put_slice(v.as_bytes());
+        buf.put_slice(b"\r\n");
     }
 
-    push(buf, "\r\n".as_bytes());
-    push(buf, msg.response.as_slice());
-}
-
-#[inline]
-fn push(buf: &mut BytesMut, data: &[u8]) {
-    let len = data.len();
-    buf.reserve(len);
-    unsafe {
-        buf.bytes_mut()[..len].copy_from_slice(data);
-        buf.advance_mut(len);
-    }
+    buf.put_slice(b"\r\n");
+    buf.put_slice(msg.body.as_bytes());
 }
 
 // TODO: impl fmt::Write for Vec<u8>
@@ -87,25 +114,15 @@ fn push(buf: &mut BytesMut, data: &[u8]) {
 // Right now `write!` on `Vec<u8>` goes through io::Write and is not super
 // speedy, so inline a less-crufty implementation here which doesn't go through
 // io::Error.
-struct FastWrite<'a>(&'a mut BytesMut);
+pub struct BodyWriter<'a>(pub &'a mut BytesMut);
 
-impl<'a> fmt::Write for FastWrite<'a> {
-    #[inline]
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        push(&mut *self.0, s.as_bytes());
+impl<'a> io::Write for BodyWriter<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
-    }
-
-    fn write_fmt(&mut self, args: fmt::Arguments) -> fmt::Result {
-        fmt::write(self, args)
-    }
-}
-
-impl fmt::Display for StatusMessage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            StatusMessage::Ok => f.pad("200 OK"),
-            StatusMessage::Custom(c, ref s) => write!(f, "{} {}", c, s),
-        }
     }
 }

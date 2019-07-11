@@ -1,10 +1,10 @@
 extern crate bytes;
 extern crate httparse;
+extern crate itoa;
 #[macro_use]
 extern crate log;
 #[macro_use]
 extern crate may;
-extern crate smallvec;
 extern crate time;
 
 mod date;

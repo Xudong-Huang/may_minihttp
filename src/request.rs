@@ -1,15 +1,14 @@
 use std::{fmt, io, slice, str};
 
 use bytes::BytesMut;
-
 use httparse;
 
 pub struct Request {
     method: Slice,
     path: Slice,
     version: u8,
-    // TODO: use a small vec to avoid this unconditional allocation
-    headers: Vec<(Slice, Slice)>,
+    headers: [(Slice, Slice); 16],
+    headers_len: usize,
     data: BytesMut,
 }
 
@@ -22,11 +21,13 @@ pub struct RequestHeaders<'req> {
 
 impl Request {
     pub fn method(&self) -> &str {
-        str::from_utf8(self.slice(&self.method)).unwrap()
+        // str::from_utf8(self.slice(&self.method)).unwrap()
+        unsafe { str::from_utf8_unchecked(self.slice(&self.method)) }
     }
 
     pub fn path(&self) -> &str {
-        str::from_utf8(self.slice(&self.path)).unwrap()
+        // str::from_utf8(self.slice(&self.path)).unwrap()
+        unsafe { str::from_utf8_unchecked(self.slice(&self.path)) }
     }
 
     pub fn version(&self) -> u8 {
@@ -35,7 +36,7 @@ impl Request {
 
     pub fn headers(&self) -> RequestHeaders {
         RequestHeaders {
-            headers: self.headers.iter(),
+            headers: self.headers[..self.headers_len].iter(),
             req: self,
         }
     }
@@ -54,13 +55,19 @@ impl fmt::Debug for Request {
 pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
     // TODO: we should grow this headers array if parsing fails and asks
     //       for more headers
-    let (method, path, version, headers, amt) = {
-        let mut headers = [httparse::EMPTY_HEADER; 16];
+    let (method, path, version, headers, headers_len, amt) = {
+        let mut headers: [httparse::Header; 16] =
+            unsafe { std::mem::MaybeUninit::uninit().assume_init() };
         let mut r = httparse::Request::new(&mut headers);
-        let status = try!(r.parse(buf).map_err(|e| {
-            let msg = format!("failed to parse http request: {:?}", e);
-            io::Error::new(io::ErrorKind::Other, msg)
-        }));
+
+        let status = match r.parse(buf) {
+            Ok(s) => s,
+            #[cold]
+            Err(e) => {
+                let msg = format!("failed to parse http request: {:?}", e);
+                return Err(io::Error::new(io::ErrorKind::Other, msg));
+            }
+        };
 
         let amt = match status {
             httparse::Status::Complete(amt) => amt,
@@ -69,30 +76,36 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
 
         let toslice = |a: &[u8]| {
             let start = a.as_ptr() as usize - buf.as_ptr() as usize;
-            assert!(start < buf.len());
+            debug_assert!(start < buf.len());
             (start, start + a.len())
         };
+
+        let mut headers: [(Slice, Slice); 16] =
+            unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        let mut headers_len = 0;
+        for h in r.headers.iter() {
+            headers[headers_len] = (toslice(h.name.as_bytes()), toslice(h.value));
+            headers_len += 1;
+        }
 
         (
             toslice(r.method.unwrap().as_bytes()),
             toslice(r.path.unwrap().as_bytes()),
             r.version.unwrap(),
-            r.headers
-                .iter()
-                .map(|h| (toslice(h.name.as_bytes()), toslice(h.value)))
-                .collect(),
+            headers,
+            headers_len,
             amt,
         )
     };
 
-    Ok(Request {
-        method: method,
-        path: path,
-        version: version,
-        headers: headers,
+    Ok(Some(Request {
+        method,
+        path,
+        version,
+        headers,
+        headers_len,
         data: buf.split_to(amt),
-    }
-    .into())
+    }))
 }
 
 impl<'req> Iterator for RequestHeaders<'req> {
@@ -102,7 +115,7 @@ impl<'req> Iterator for RequestHeaders<'req> {
         self.headers.next().map(|&(ref a, ref b)| {
             let a = self.req.slice(a);
             let b = self.req.slice(b);
-            (str::from_utf8(a).unwrap(), b)
+            (unsafe { str::from_utf8_unchecked(a) }, b)
         })
     }
 }

@@ -12,7 +12,7 @@ impl HttpService for HellorJson {
     fn call(&self, _request: Request) -> io::Result<Response> {
         let mut resp = Response::new();
         resp.header("Content-Type", "application/json");
-        *resp.body_mut() = serde_json::to_vec(&json!({"message": "Hello, World!"})).unwrap();
+        serde_json::to_writer(resp.body_mut(), &json!({"message": "Hello, World!"}))?;
         Ok(resp)
     }
 }
