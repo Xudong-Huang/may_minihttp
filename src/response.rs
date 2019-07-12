@@ -55,7 +55,8 @@ impl Response {
     }
 
     pub fn header(&mut self, name: &'static str, val: &'static str) -> &mut Response {
-        self.headers[self.headers_len] = (name, val);
+        debug_assert!(self.headers_len < 16);
+        *unsafe { self.headers.get_unchecked_mut(self.headers_len) } = (name, val);
         self.headers_len += 1;
         self
     }
@@ -65,9 +66,9 @@ impl Response {
         self
     }
 
-    pub fn body_mut(&mut self) -> BodyWriter {
+    pub fn body_mut(&mut self) -> &mut BytesMut {
         let buf = match self.body {
-            Body::DMsg(ref mut v) => return BodyWriter(v),
+            Body::DMsg(ref mut v) => return v,
             Body::SMsg(s) => {
                 let mut buf = BytesMut::new();
                 if !s.is_empty() {
@@ -78,8 +79,8 @@ impl Response {
         };
 
         self.body = Body::DMsg(buf);
-        match &mut self.body {
-            Body::DMsg(v) => BodyWriter(v),
+        match self.body {
+            Body::DMsg(ref mut v) => v,
             Body::SMsg(_) => unreachable!(),
         }
     }
@@ -98,7 +99,7 @@ pub fn encode(msg: Response, mut buf: &mut BytesMut) {
     buf.put_slice(b"\r\n");
 
     for i in 0..msg.headers_len {
-        let (k, v) = msg.headers[i];
+        let (k, v) = *unsafe { msg.headers.get_unchecked(i) };
         buf.put_slice(k.as_bytes());
         buf.put_slice(b": ");
         buf.put_slice(v.as_bytes());
@@ -109,14 +110,11 @@ pub fn encode(msg: Response, mut buf: &mut BytesMut) {
     buf.put_slice(msg.body.as_bytes());
 }
 
-// TODO: impl fmt::Write for Vec<u8>
-//
-// Right now `write!` on `Vec<u8>` goes through io::Write and is not super
-// speedy, so inline a less-crufty implementation here which doesn't go through
-// io::Error.
+// impl io::Write for the response body
 pub struct BodyWriter<'a>(pub &'a mut BytesMut);
 
 impl<'a> io::Write for BodyWriter<'a> {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.0.extend_from_slice(buf);
         Ok(buf.len())

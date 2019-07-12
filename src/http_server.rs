@@ -57,7 +57,6 @@ fn internal_error_rsp(e: io::Error) -> Response {
     err_rsp.status_code("500", "Internal Server Error");
     err_rsp
         .body_mut()
-        .0
         .extend_from_slice(e.description().as_bytes());
     err_rsp
 }

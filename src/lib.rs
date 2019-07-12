@@ -14,4 +14,4 @@ mod response;
 
 pub use http_server::{HttpServer, HttpService};
 pub use request::Request;
-pub use response::Response;
+pub use response::{BodyWriter, Response};

@@ -53,55 +53,44 @@ impl fmt::Debug for Request {
 }
 
 pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
-    // TODO: we should grow this headers array if parsing fails and asks
-    //       for more headers
-    let (method, path, version, headers, headers_len, amt) = {
-        let mut headers: [httparse::Header; 16] =
-            unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let mut r = httparse::Request::new(&mut headers);
+    let mut headers: [httparse::Header; 16] =
+        unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+    let mut r = httparse::Request::new(&mut headers);
 
-        let status = match r.parse(buf) {
-            Ok(s) => s,
-            #[cold]
-            Err(e) => {
-                let msg = format!("failed to parse http request: {:?}", e);
-                return Err(io::Error::new(io::ErrorKind::Other, msg));
-            }
-        };
-
-        let amt = match status {
-            httparse::Status::Complete(amt) => amt,
-            httparse::Status::Partial => return Ok(None),
-        };
-
-        let toslice = |a: &[u8]| {
-            let start = a.as_ptr() as usize - buf.as_ptr() as usize;
-            debug_assert!(start < buf.len());
-            (start, start + a.len())
-        };
-
-        let mut headers: [(Slice, Slice); 16] =
-            unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let mut headers_len = 0;
-        for h in r.headers.iter() {
-            headers[headers_len] = (toslice(h.name.as_bytes()), toslice(h.value));
-            headers_len += 1;
+    let status = match r.parse(buf) {
+        Ok(s) => s,
+        #[cold]
+        Err(e) => {
+            let msg = format!("failed to parse http request: {:?}", e);
+            return Err(io::Error::new(io::ErrorKind::Other, msg));
         }
-
-        (
-            toslice(r.method.unwrap().as_bytes()),
-            toslice(r.path.unwrap().as_bytes()),
-            r.version.unwrap(),
-            headers,
-            headers_len,
-            amt,
-        )
     };
 
+    let amt = match status {
+        httparse::Status::Complete(amt) => amt,
+        httparse::Status::Partial => return Ok(None),
+    };
+
+    let toslice = |a: &[u8]| {
+        let start = a.as_ptr() as usize - buf.as_ptr() as usize;
+        debug_assert!(start < buf.len());
+        (start, start + a.len())
+    };
+
+    let mut headers: [(Slice, Slice); 16] =
+        unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+    let mut headers_len = 0;
+    for h in r.headers.iter() {
+        debug_assert!(headers_len < 16);
+        *unsafe { headers.get_unchecked_mut(headers_len) } =
+            (toslice(h.name.as_bytes()), toslice(h.value));
+        headers_len += 1;
+    }
+
     Ok(Some(Request {
-        method,
-        path,
-        version,
+        method: toslice(r.method.unwrap().as_bytes()),
+        path: toslice(r.path.unwrap().as_bytes()),
+        version: r.version.unwrap(),
         headers,
         headers_len,
         data: buf.split_to(amt),
