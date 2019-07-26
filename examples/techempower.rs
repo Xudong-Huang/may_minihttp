@@ -1,8 +1,3 @@
-extern crate may;
-extern crate may_minihttp;
-#[macro_use]
-extern crate serde_json;
-
 use may_minihttp::{BodyWriter, HttpServer, HttpService, Request, Response};
 use std::io;
 
@@ -19,7 +14,7 @@ impl HttpService for Techempower {
                 let body = resp.body_mut();
                 body.reserve(27);
                 let w = BodyWriter(body);
-                serde_json::to_writer(w, &json!({"message": "Hello, World!"}))?;
+                serde_json::to_writer(w, &serde_json::json!({"message": "Hello, World!"}))?;
             }
             "/plaintext" => {
                 resp.header("Content-Type", "text/plain")

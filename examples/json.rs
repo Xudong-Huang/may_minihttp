@@ -1,8 +1,3 @@
-extern crate may;
-extern crate may_minihttp;
-#[macro_use]
-extern crate serde_json;
-
 use may_minihttp::{BodyWriter, HttpServer, HttpService, Request, Response};
 use std::io;
 
@@ -13,7 +8,7 @@ impl HttpService for HellorJson {
         let mut resp = Response::new();
         resp.header("Content-Type", "application/json");
         let w = BodyWriter(resp.body_mut());
-        serde_json::to_writer(w, &json!({"message": "Hello, World!"}))?;
+        serde_json::to_writer(w, &serde_json::json!({"message": "Hello, World!"}))?;
         Ok(resp)
     }
 }

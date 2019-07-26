@@ -1,6 +1,3 @@
-extern crate env_logger;
-extern crate may_minihttp;
-
 use std::io;
 
 use may_minihttp::{HttpServer, HttpService, Request, Response};
