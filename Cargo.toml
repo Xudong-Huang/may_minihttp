@@ -14,8 +14,13 @@ bytes = "0.4"
 httparse = "1"
 
 [dev-dependencies]
-serde_json = "1"
+rand = "0.7"
+num_cpus = "1.0"
 env_logger = "0.6"
+serde = "1"
+serde_json = "1"
+serde_derive = "1"
+postgres = { git = "https://github.com/Xudong-Huang/rust-postgres" }
 
 [profile.release]
 lto = true

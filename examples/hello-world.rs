@@ -4,10 +4,11 @@ use std::io;
 /// `HelloWorld` is the *service* that we're going to be implementing to service
 /// the HTTP requests we receive.
 ///
+#[derive(Clone)]
 struct HelloWorld;
 
 impl HttpService for HelloWorld {
-    fn call(&self, _request: Request) -> io::Result<Response> {
+    fn call(&mut self, _request: Request) -> io::Result<Response> {
         let mut resp = Response::new();
         resp.body("Hello, world!");
         Ok(resp)

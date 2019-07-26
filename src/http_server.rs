@@ -3,7 +3,6 @@
 use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
-use std::sync::Arc;
 
 use crate::request::{self, Request};
 use crate::response::{self, Response};
@@ -48,13 +47,7 @@ macro_rules! t_c {
 /// user code should supply a type that impl the `call` method for the http server
 ///
 pub trait HttpService {
-    fn call(&self, request: Request) -> io::Result<Response>;
-}
-
-impl<T: HttpService> HttpService for Arc<T> {
-    fn call(&self, request: Request) -> io::Result<Response> {
-        HttpService::call(&**self, request)
-    }
+    fn call(&mut self, request: Request) -> io::Result<Response>;
 }
 
 pub trait HttpServiceFactory: Send + Sized + 'static {
@@ -94,7 +87,7 @@ fn internal_error_rsp(e: io::Error) -> Response {
 ///
 pub struct HttpServer<T>(pub T);
 
-fn each_connection_loop<S, T>(mut stream: S, service: T)
+fn each_connection_loop<S, T>(mut stream: S, mut service: T)
 where
     S: Read + Write,
     T: HttpService,
@@ -134,12 +127,12 @@ where
     }
 }
 
-impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
+impl<T: HttpService + Clone + Send + Sync + 'static> HttpServer<T> {
     /// Spawns the http service, binding to the given address
     /// return a coroutine that you can cancel it when need to stop the service
     pub fn start<L: ToSocketAddrs>(self, addr: L) -> io::Result<coroutine::JoinHandle<()>> {
         let listener = TcpListener::bind(addr)?;
-        let service = Arc::new(self.0);
+        let service = self.0;
         go!(
             coroutine::Builder::new().name("TcpServer".to_owned()),
             move || {

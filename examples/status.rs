@@ -2,10 +2,11 @@ use std::io;
 
 use may_minihttp::{HttpServer, HttpService, Request, Response};
 
+#[derive(Clone)]
 struct StatusService;
 
 impl HttpService for StatusService {
-    fn call(&self, _request: Request) -> io::Result<Response> {
+    fn call(&mut self, _request: Request) -> io::Result<Response> {
         let (code, message) = match _request.path() {
             "/200" => ("200", "OK"),
             "/400" => ("400", "Bad Request"),
