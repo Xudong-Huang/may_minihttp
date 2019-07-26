@@ -11,25 +11,6 @@ use bytes::{BufMut, BytesMut};
 use may::net::TcpListener;
 use may::{coroutine, go};
 
-/// the http service trait
-/// user code should supply a type that impl the `call` method for the http server
-///
-pub trait HttpService {
-    fn call(&self, request: Request) -> io::Result<Response>;
-}
-
-impl<T: HttpService> HttpService for Arc<T> {
-    fn call(&self, request: Request) -> io::Result<Response> {
-        HttpService::call(&**self, request)
-    }
-}
-
-pub trait HttpServiceFactory {
-    type Service: HttpService + Send;
-    // creat a new http service for each connection
-    fn new_service(&self) -> Self::Service;
-}
-
 macro_rules! t {
     ($e: expr) => {
         match $e {
@@ -61,6 +42,41 @@ macro_rules! t_c {
             }
         }
     };
+}
+
+/// the http service trait
+/// user code should supply a type that impl the `call` method for the http server
+///
+pub trait HttpService {
+    fn call(&self, request: Request) -> io::Result<Response>;
+}
+
+impl<T: HttpService> HttpService for Arc<T> {
+    fn call(&self, request: Request) -> io::Result<Response> {
+        HttpService::call(&**self, request)
+    }
+}
+
+pub trait HttpServiceFactory: Send + Sized + 'static {
+    type Service: HttpService + Send;
+    // creat a new http service for each connection
+    fn new_service(&self) -> Self::Service;
+
+    /// Spawns the http service, binding to the given address
+    /// return a coroutine that you can cancel it when need to stop the service
+    fn start<L: ToSocketAddrs>(self, addr: L) -> io::Result<coroutine::JoinHandle<()>> {
+        let listener = TcpListener::bind(addr)?;
+        go!(
+            coroutine::Builder::new().name("TcpServerFac".to_owned()),
+            move || {
+                for stream in listener.incoming() {
+                    let stream = t_c!(stream);
+                    let service = self.new_service();
+                    go!(move || each_connection_loop(stream, service));
+                }
+            }
+        )
+    }
 }
 
 fn internal_error_rsp(e: io::Error) -> Response {
@@ -130,28 +146,6 @@ impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
                 for stream in listener.incoming() {
                     let stream = t_c!(stream);
                     let service = service.clone();
-                    go!(move || each_connection_loop(stream, service));
-                }
-            }
-        )
-    }
-}
-
-impl<T> HttpServer<T>
-where
-    T: HttpServiceFactory + Send + 'static,
-{
-    /// Spawns the http service, binding to the given address
-    /// return a coroutine that you can cancel it when need to stop the service
-    pub fn fac_start<L: ToSocketAddrs>(self, addr: L) -> io::Result<coroutine::JoinHandle<()>> {
-        let listener = TcpListener::bind(addr)?;
-        let factory = self.0;
-        go!(
-            coroutine::Builder::new().name("TcpServerFac".to_owned()),
-            move || {
-                for stream in listener.incoming() {
-                    let stream = t_c!(stream);
-                    let service = factory.new_service();
                     go!(move || each_connection_loop(stream, service));
                 }
             }

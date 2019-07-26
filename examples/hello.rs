@@ -1,4 +1,4 @@
-use may_minihttp::{HttpServer, HttpService, HttpServiceFactory, Request, Response};
+use may_minihttp::{HttpService, HttpServiceFactory, Request, Response};
 use std::io;
 
 /// `HelloWorld` is the *service* that we're going to be implementing to service
@@ -27,8 +27,6 @@ impl HttpServiceFactory for HelloWorldFac {
 fn main() {
     may::config().set_io_workers(1);
     env_logger::init();
-    let server = HttpServer(HelloWorldFac)
-        .fac_start("127.0.0.1:8080")
-        .unwrap();
+    let server = HelloWorldFac.start("127.0.0.1:8080").unwrap();
     server.wait();
 }
