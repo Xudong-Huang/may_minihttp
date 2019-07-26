@@ -15,7 +15,13 @@ use may::{coroutine, go};
 /// user code should supply a type that impl the `call` method for the http server
 ///
 pub trait HttpService {
-    fn call(&self, _request: Request) -> io::Result<Response>;
+    fn call(&self, request: Request) -> io::Result<Response>;
+}
+
+impl<T: HttpService> HttpService for Arc<T> {
+    fn call(&self, request: Request) -> io::Result<Response> {
+        HttpService::call(&**self, request)
+    }
 }
 
 pub trait HttpServiceFactory {
@@ -72,53 +78,59 @@ fn internal_error_rsp(e: io::Error) -> Response {
 ///
 pub struct HttpServer<T>(pub T);
 
+fn each_connection_loop<S, T>(mut stream: S, service: T)
+where
+    S: Read + Write,
+    T: HttpService,
+{
+    let mut buf = BytesMut::with_capacity(4096 * 8);
+    let mut rsps = BytesMut::with_capacity(4096 * 8);
+    loop {
+        // read the socket for reqs
+        if buf.remaining_mut() < 1024 {
+            buf.reserve(4096 * 8);
+        }
+
+        let n = {
+            let read_buf = unsafe { buf.bytes_mut() };
+            t!(stream.read(read_buf))
+        };
+        //connection was closed
+        if n == 0 {
+            #[cold]
+            return;
+        }
+        unsafe { buf.advance_mut(n) };
+
+        if buf.remaining_mut() < 1024 {
+            buf.reserve(4096 * 8);
+        }
+
+        // prepare the reqs
+        while let Some(req) = t!(request::decode(&mut buf)) {
+            let ret = service.call(req).unwrap_or_else(internal_error_rsp);
+            response::encode(ret, &mut rsps);
+        }
+
+        // send the result back to client
+        t!(stream.write_all(rsps.as_ref()));
+        rsps.clear();
+    }
+}
+
 impl<T: HttpService + Send + Sync + 'static> HttpServer<T> {
     /// Spawns the http service, binding to the given address
     /// return a coroutine that you can cancel it when need to stop the service
     pub fn start<L: ToSocketAddrs>(self, addr: L) -> io::Result<coroutine::JoinHandle<()>> {
         let listener = TcpListener::bind(addr)?;
+        let service = Arc::new(self.0);
         go!(
             coroutine::Builder::new().name("TcpServer".to_owned()),
             move || {
-                let server = Arc::new(self);
                 for stream in listener.incoming() {
-                    let mut stream = t_c!(stream);
-                    let server = server.clone();
-                    go!(move || {
-                        let mut buf = BytesMut::with_capacity(4096 * 8);
-                        let mut rsps = BytesMut::with_capacity(4096 * 8);
-                        loop {
-                            // read the socket for reqs
-                            if buf.remaining_mut() < 1024 {
-                                buf.reserve(4096 * 8);
-                            }
-
-                            let n = {
-                                let read_buf = unsafe { buf.bytes_mut() };
-                                t!(stream.read(read_buf))
-                            };
-                            //connection was closed
-                            if n == 0 {
-                                #[cold]
-                                return;
-                            }
-                            unsafe { buf.advance_mut(n) };
-
-                            if buf.remaining_mut() < 1024 {
-                                buf.reserve(4096 * 8);
-                            }
-
-                            // prepare the reqs
-                            while let Some(req) = t!(request::decode(&mut buf)) {
-                                let ret = server.0.call(req).unwrap_or_else(internal_error_rsp);
-                                response::encode(ret, &mut rsps);
-                            }
-
-                            // send the result back to client
-                            t!(stream.write_all(rsps.as_ref()));
-                            rsps.clear();
-                        }
-                    });
+                    let stream = t_c!(stream);
+                    let service = service.clone();
+                    go!(move || each_connection_loop(stream, service));
                 }
             }
         )
@@ -138,43 +150,9 @@ where
             coroutine::Builder::new().name("TcpServerFac".to_owned()),
             move || {
                 for stream in listener.incoming() {
-                    let mut stream = t_c!(stream);
-                    let server = factory.new_service();
-                    go!(move || {
-                        let mut buf = BytesMut::with_capacity(4096 * 8);
-                        let mut rsps = BytesMut::with_capacity(4096 * 8);
-                        loop {
-                            // read the socket for reqs
-                            if buf.remaining_mut() < 1024 {
-                                buf.reserve(4096 * 8);
-                            }
-
-                            let n = {
-                                let read_buf = unsafe { buf.bytes_mut() };
-                                t!(stream.read(read_buf))
-                            };
-                            //connection was closed
-                            if n == 0 {
-                                #[cold]
-                                return;
-                            }
-                            unsafe { buf.advance_mut(n) };
-
-                            if buf.remaining_mut() < 1024 {
-                                buf.reserve(4096 * 8);
-                            }
-
-                            // prepare the reqs
-                            while let Some(req) = t!(request::decode(&mut buf)) {
-                                let ret = server.call(req).unwrap_or_else(internal_error_rsp);
-                                response::encode(ret, &mut rsps);
-                            }
-
-                            // send the result back to client
-                            t!(stream.write_all(rsps.as_ref()));
-                            rsps.clear();
-                        }
-                    });
+                    let stream = t_c!(stream);
+                    let service = factory.new_service();
+                    go!(move || each_connection_loop(stream, service));
                 }
             }
         )
