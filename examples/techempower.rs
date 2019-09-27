@@ -1,9 +1,10 @@
 use std::io;
-use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use may_minihttp::{BodyWriter, HttpService, HttpServiceFactory, Request, Response};
-use postgres::{stmt::Statement, Connection, TlsMode};
-use rand::{rngs::ThreadRng, Rng};
+use may_postgres::{self, Client, Statement};
+use oorandom::Rand32;
 
 use serde_derive::Serialize;
 
@@ -13,37 +14,52 @@ struct WorldRow {
     randomnumber: i32,
 }
 
+struct PgConnectionPool {
+    idx: AtomicUsize,
+    clients: Vec<Arc<PgConnection>>,
+}
+
+impl PgConnectionPool {
+    fn new(db_url: &str, size: usize) -> PgConnectionPool {
+        let mut clients = Vec::with_capacity(size);
+        for _ in 0..size {
+            let client = PgConnection::new(db_url);
+            clients.push(Arc::new(client));
+        }
+
+        PgConnectionPool {
+            idx: AtomicUsize::new(0),
+            clients,
+        }
+    }
+
+    fn get_connection(&self) -> (Arc<PgConnection>, usize) {
+        let idx = self.idx.fetch_add(1, Ordering::Relaxed);
+        let len = self.clients.len();
+        (self.clients[idx % len].clone(), idx)
+    }
+}
+
 struct PgConnection {
-    con: Pin<Box<Connection>>,
-    // fortune: Statement<'static>,
-    world: Statement<'static>,
-    rng: ThreadRng,
+    client: Client,
+    world: Statement,
 }
 
 unsafe impl Send for PgConnection {}
 
 impl PgConnection {
     fn new(db_url: &str) -> Self {
-        let con = Box::pin(Connection::connect(db_url, TlsMode::None).unwrap());
-        let rng = rand::thread_rng();
-        let mut db = PgConnection {
-            con,
-            rng,
-            world: unsafe { std::mem::MaybeUninit::uninit().assume_init() },
-        };
-
-        let world = db
-            .con
+        let client = may_postgres::connect(db_url).unwrap();
+        let world = client
             .prepare("SELECT id, randomnumber FROM world WHERE id=$1")
             .unwrap();
-        db.world = unsafe { std::mem::transmute(world) };
-        db
+
+        PgConnection { client, world }
     }
 
-    fn get_world(&mut self) -> io::Result<WorldRow> {
-        let random_id = self.rng.gen_range(1, 10_001);
-        let rows = self.world.query(&[&random_id])?;
-        let row = rows.get(0);
+    fn get_world(&self, random_id: u32) -> Result<WorldRow, may_postgres::Error> {
+        let mut rows = self.client.query(&self.world, &[&random_id]);
+        let row = rows.next().unwrap()?;
 
         Ok(WorldRow {
             id: row.get(0),
@@ -53,7 +69,8 @@ impl PgConnection {
 }
 
 struct Techempower {
-    db: PgConnection,
+    db: Arc<PgConnection>,
+    rng: Rand32,
 }
 
 impl HttpService for Techempower {
@@ -74,7 +91,11 @@ impl HttpService for Techempower {
                     .body("Hello, World!");
             }
             "/db" => {
-                let world = self.db.get_world().expect("failed to get random world");
+                let random_id = self.rng.rand_range(0..10001);
+                let world = self
+                    .db
+                    .get_world(random_id)
+                    .expect("failed to get random world");
                 resp.header("Content-Type", "application/json");
                 let body = resp.body_mut();
                 let w = BodyWriter(body);
@@ -90,23 +111,28 @@ impl HttpService for Techempower {
 }
 
 struct HttpServer {
-    db_url: String,
+    db_pool: PgConnectionPool,
 }
 
 impl HttpServiceFactory for HttpServer {
     type Service = Techempower;
 
     fn new_service(&self) -> Self::Service {
-        let db = PgConnection::new(&self.db_url);
-        Techempower { db }
+        let (db, idx) = self.db_pool.get_connection();
+        let rng = Rand32::new(idx as u64);
+        Techempower { db, rng }
     }
 }
 
 fn main() {
-    may::config().set_io_workers(num_cpus::get());
+    let cpus = num_cpus::get();
+    may::config()
+        .set_io_workers(cpus)
+        .set_io_workers(cpus)
+        .set_pool_capacity(10000);
     let db_url = "postgres://benchmarkdbuser:benchmarkdbpass@tfb-database/hello_world";
     let http_server = HttpServer {
-        db_url: db_url.to_owned(),
+        db_pool: PgConnectionPool::new(db_url, cpus),
     };
     let server = http_server.start("127.0.0.1:8080").unwrap();
     server.join().unwrap();
