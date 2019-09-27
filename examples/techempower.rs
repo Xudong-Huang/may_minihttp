@@ -57,9 +57,18 @@ impl PgConnection {
         PgConnection { client, world }
     }
 
-    fn get_world(&self, random_id: u32) -> Result<WorldRow, may_postgres::Error> {
+    fn get_world(&self, random_id: i32) -> Result<WorldRow, may_postgres::Error> {
         let mut rows = self.client.query(&self.world, &[&random_id]);
-        let row = rows.next().unwrap()?;
+        let row = match rows.next() {
+            Some(r) => r?,
+            None => {
+                dbg!(random_id);
+                return Ok(WorldRow {
+                    id: 0,
+                    randomnumber: 0,
+                });
+            }
+        };
 
         Ok(WorldRow {
             id: row.get(0),
@@ -91,7 +100,7 @@ impl HttpService for Techempower {
                     .body("Hello, World!");
             }
             "/db" => {
-                let random_id = self.rng.rand_range(0..10001);
+                let random_id = self.rng.rand_range(1..10001) as i32;
                 let world = self
                     .db
                     .get_world(random_id)
@@ -128,12 +137,12 @@ fn main() {
     let cpus = num_cpus::get();
     may::config()
         .set_io_workers(cpus)
-        .set_io_workers(cpus)
+        .set_workers(cpus)
         .set_pool_capacity(10000);
-    let db_url = "postgres://benchmarkdbuser:benchmarkdbpass@tfb-database/hello_world";
+    let db_url = "postgres://benchmarkdbuser:benchmarkdbpass@127.0.0.1/hello_world";
     let http_server = HttpServer {
         db_pool: PgConnectionPool::new(db_url, cpus),
     };
-    let server = http_server.start("127.0.0.1:8080").unwrap();
+    let server = http_server.start("127.0.0.1:8081").unwrap();
     server.join().unwrap();
 }
