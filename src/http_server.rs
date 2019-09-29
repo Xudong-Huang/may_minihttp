@@ -6,6 +6,7 @@ use std::net::ToSocketAddrs;
 
 use crate::request::{self, Request};
 use crate::response::{self, Response};
+use crate::vec_buf::VecBufs;
 use bytes::{BufMut, BytesMut};
 use may::net::TcpListener;
 use may::{coroutine, go};
@@ -47,7 +48,7 @@ macro_rules! t_c {
 /// user code should supply a type that impl the `call` method for the http server
 ///
 pub trait HttpService {
-    fn call(&mut self, request: Request) -> io::Result<Response>;
+    fn call(&mut self, req: Request, rsp: &mut Response) -> io::Result<()>;
 }
 
 pub trait HttpServiceFactory: Send + Sized + 'static {
@@ -72,9 +73,10 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
     }
 }
 
-fn internal_error_rsp(e: io::Error) -> Response {
+fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
     error!("error in service: err = {:?}", e);
-    let mut err_rsp = Response::new();
+    buf.clear();
+    let mut err_rsp = Response::new(buf);
     err_rsp.status_code("500", "Internal Server Error");
     err_rsp
         .body_mut()
@@ -92,16 +94,16 @@ where
     S: Read + Write,
     T: HttpService,
 {
-    let mut buf = BytesMut::with_capacity(4096 * 8);
-    let mut rsps = BytesMut::with_capacity(4096 * 8);
+    let mut req_buf = BytesMut::with_capacity(4096 * 8);
+    let mut rsp_buf = BytesMut::with_capacity(4096 * 8);
     loop {
         // read the socket for reqs
-        if buf.remaining_mut() < 1024 {
-            buf.reserve(4096 * 8);
+        if req_buf.remaining_mut() < 1024 {
+            req_buf.reserve(4096 * 8);
         }
 
         let n = {
-            let read_buf = unsafe { buf.bytes_mut() };
+            let read_buf = unsafe { req_buf.bytes_mut() };
             t!(stream.read(read_buf))
         };
         //connection was closed
@@ -109,21 +111,23 @@ where
             #[cold]
             return;
         }
-        unsafe { buf.advance_mut(n) };
-
-        if buf.remaining_mut() < 1024 {
-            buf.reserve(4096 * 8);
-        }
+        unsafe { req_buf.advance_mut(n) };
 
         // prepare the reqs
-        while let Some(req) = t!(request::decode(&mut buf)) {
-            let ret = service.call(req).unwrap_or_else(internal_error_rsp);
-            response::encode(ret, &mut rsps);
-        }
+        while let Some(req) = t!(request::decode(&mut req_buf)) {
+            let mut rsp = Response::new(&mut rsp_buf);
+            match service.call(req, &mut rsp) {
+                Ok(_) => {}
+                Err(e) => rsp = internal_error_rsp(e, &mut rsp_buf),
+            };
 
-        // send the result back to client
-        t!(stream.write_all(rsps.as_ref()));
-        rsps.clear();
+            // send the result back to client
+            let rsp = VecBufs::new(response::encode(rsp));
+            t!(rsp.write_all(&mut stream));
+
+            // take back the result
+            rsp_buf.clear();
+        }
     }
 }
 

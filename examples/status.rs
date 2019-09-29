@@ -6,18 +6,17 @@ use may_minihttp::{HttpServer, HttpService, Request, Response};
 struct StatusService;
 
 impl HttpService for StatusService {
-    fn call(&mut self, _request: Request) -> io::Result<Response> {
-        let (code, message) = match _request.path() {
+    fn call(&mut self, req: Request, rsp: &mut Response) -> io::Result<()> {
+        let (code, message) = match req.path() {
             "/200" => ("200", "OK"),
             "/400" => ("400", "Bad Request"),
             "/500" => ("500", "Internal Server Error"),
             _ => ("404", "Not Found"),
         };
 
-        let mut resp = Response::new();
-        resp.status_code(code, message);
-        resp.body(message);
-        Ok(resp)
+        rsp.status_code(code, message);
+        rsp.body(message);
+        Ok(())
     }
 }
 
