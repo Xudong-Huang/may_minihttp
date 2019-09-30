@@ -54,7 +54,7 @@ impl<'a> Response<'a> {
         match self.body {
             Body::DMsg => {}
             Body::SMsg(s) => {
-                self.rsp_buf.extend_from_slice(s.as_bytes());
+                self.rsp_buf.put_slice(s.as_bytes());
                 self.body = Body::DMsg;
             }
         }
@@ -97,7 +97,7 @@ pub struct BodyWriter<'a>(pub &'a mut BytesMut);
 impl<'a> io::Write for BodyWriter<'a> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.extend_from_slice(buf);
+        self.0.put_slice(buf);
         Ok(buf.len())
     }
 

@@ -1,8 +1,8 @@
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 use std::fmt::{self, Write};
 use std::str;
 
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use time::{self, Duration};
 
 pub struct Now;
@@ -35,7 +35,7 @@ struct LastRenderedNow {
     next_update: time::Timespec,
 }
 
-thread_local!(static LAST: RefCell<LastRenderedNow> = RefCell::new(LastRenderedNow {
+thread_local!(static LAST: UnsafeCell<LastRenderedNow> = UnsafeCell::new(LastRenderedNow {
     bytes: [0; 128],
     amt: 0,
     next_update: time::Timespec::new(0, 0),
@@ -44,7 +44,7 @@ thread_local!(static LAST: RefCell<LastRenderedNow> = RefCell::new(LastRenderedN
 impl fmt::Display for Now {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         LAST.with(|cache| {
-            let mut cache = cache.borrow_mut();
+            let cache = unsafe { &mut *cache.get() };
             let now = time::get_time();
             if now > cache.next_update {
                 cache.update(now);
@@ -57,19 +57,19 @@ impl fmt::Display for Now {
 impl Now {
     pub fn put_bytes(&self, buf: &mut BytesMut) {
         LAST.with(|cache| {
-            let mut cache = cache.borrow_mut();
+            let cache = unsafe { &mut *cache.get() };
             let now = time::get_time();
             if now > cache.next_update {
                 cache.update(now);
             }
-            buf.extend_from_slice(cache.raw_buffer())
+            buf.put_slice(cache.raw_buffer())
         })
     }
 }
 
 impl LastRenderedNow {
     fn buffer(&self) -> &str {
-        str::from_utf8(&self.bytes[..self.amt]).unwrap()
+        unsafe { str::from_utf8_unchecked(&self.bytes[..self.amt]) }
     }
 
     fn raw_buffer(&self) -> &[u8] {

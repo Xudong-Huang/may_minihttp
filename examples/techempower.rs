@@ -93,10 +93,8 @@ impl HttpService for Techempower {
         match req.path() {
             "/json" => {
                 rsp.header("Content-Type: application/json");
-                let body = rsp.body_mut();
-                body.reserve(27);
                 serde_json::to_writer(
-                    BodyWriter(body),
+                    BodyWriter(rsp.body_mut()),
                     &HeloMessage {
                         message: "Hello, World",
                     },
@@ -112,9 +110,7 @@ impl HttpService for Techempower {
                     .get_world(random_id)
                     .expect("failed to get random world");
                 rsp.header("Content-Type: application/json");
-                let body = rsp.body_mut();
-                body.reserve(33);
-                serde_json::to_writer(BodyWriter(body), &world)?;
+                serde_json::to_writer(BodyWriter(rsp.body_mut()), &world)?;
             }
             _ => {
                 rsp.status_code("404", "Not Found");
