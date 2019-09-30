@@ -1,6 +1,6 @@
 use std::io;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 
 pub struct Response<'a> {
     headers: [&'static str; 16],
@@ -61,16 +61,29 @@ impl<'a> Response<'a> {
         self.rsp_buf
     }
 
-    fn get_body(&mut self) -> Bytes {
+    fn body_len(&self) -> usize {
         match self.body {
-            Body::DMsg => self.rsp_buf.take().freeze(),
-            Body::SMsg(s) => Bytes::from_static(s.as_bytes()),
+            Body::DMsg => self.rsp_buf.len(),
+            Body::SMsg(s) => s.len(),
+        }
+    }
+
+    fn get_body(&mut self) -> &[u8] {
+        match self.body {
+            Body::DMsg => self.rsp_buf.as_ref(),
+            Body::SMsg(s) => s.as_bytes(),
+        }
+    }
+
+    fn clear_body(&mut self) {
+        match self.body {
+            Body::DMsg => self.rsp_buf.clear(),
+            Body::SMsg(_) => {}
         }
     }
 }
 
 pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
-    let body = msg.get_body();
     buf.put_slice(b"HTTP/1.1 ");
     buf.put_slice(msg.status_message.code.as_bytes());
     buf.put_slice(b" ");
@@ -78,7 +91,7 @@ pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
     buf.put_slice(b"\r\nServer: may\r\nDate: ");
     crate::date::now().put_bytes(buf);
     buf.put_slice(b"\r\nContent-Length: ");
-    itoa::fmt(&mut buf, body.len()).unwrap();
+    itoa::fmt(&mut buf, msg.body_len()).unwrap();
     buf.put_slice(b"\r\n");
 
     for i in 0..msg.headers_len {
@@ -88,7 +101,8 @@ pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
     }
 
     buf.put_slice(b"\r\n");
-    buf.put_slice(&body);
+    buf.put_slice(msg.get_body());
+    msg.clear_body();
 }
 
 // impl io::Write for the response body

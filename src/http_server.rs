@@ -113,10 +113,6 @@ where
         }
         unsafe { req_buf.advance_mut(n) };
 
-        if body_buf.remaining_mut() < 1024 {
-            body_buf.reserve(4096 * 8);
-        }
-
         // prepare the reqs
         while let Some(req) = t!(request::decode(&mut req_buf)) {
             let mut rsp = Response::new(&mut body_buf);
