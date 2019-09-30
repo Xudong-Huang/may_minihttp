@@ -1,33 +1,18 @@
 use std::io;
 
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
-pub struct Response {
+pub struct Response<'a> {
     headers: [(&'static str, &'static str); 16],
     headers_len: usize,
     status_message: StatusMessage,
     body: Body,
+    rsp_buf: &'a mut BytesMut,
 }
 
 enum Body {
     SMsg(&'static str),
-    DMsg(BytesMut),
-}
-
-impl Body {
-    fn len(&self) -> usize {
-        match self {
-            Body::SMsg(s) => s.len(),
-            Body::DMsg(v) => v.len(),
-        }
-    }
-
-    fn as_bytes(&self) -> &[u8] {
-        match self {
-            Body::SMsg(s) => s.as_bytes(),
-            Body::DMsg(v) => &v,
-        }
-    }
+    DMsg,
 }
 
 struct StatusMessage {
@@ -35,58 +20,57 @@ struct StatusMessage {
     msg: &'static str,
 }
 
-impl Response {
-    pub fn new() -> Response {
+impl<'a> Response<'a> {
+    pub(crate) fn new(rsp_buf: &'a mut BytesMut) -> Response {
         Response {
             headers: unsafe { std::mem::MaybeUninit::uninit().assume_init() },
             headers_len: 0,
-            body: Body::DMsg(BytesMut::new()),
+            body: Body::DMsg,
             status_message: StatusMessage {
                 code: "200",
                 msg: "Ok",
             },
+            rsp_buf,
         }
     }
 
-    pub fn status_code(&mut self, code: &'static str, msg: &'static str) -> &mut Response {
+    pub fn status_code(&mut self, code: &'static str, msg: &'static str) -> &mut Self {
         self.status_message = StatusMessage { code, msg };
         self
     }
 
-    pub fn header(&mut self, name: &'static str, val: &'static str) -> &mut Response {
+    pub fn header(&mut self, name: &'static str, val: &'static str) -> &mut Self {
         debug_assert!(self.headers_len < 16);
         *unsafe { self.headers.get_unchecked_mut(self.headers_len) } = (name, val);
         self.headers_len += 1;
         self
     }
 
-    pub fn body(&mut self, s: &'static str) -> &mut Response {
+    pub fn body(&mut self, s: &'static str) {
         self.body = Body::SMsg(s);
-        self
     }
 
     pub fn body_mut(&mut self) -> &mut BytesMut {
-        let buf = match self.body {
-            Body::DMsg(ref mut v) => return v,
-            Body::SMsg(s) => {
-                let mut buf = BytesMut::new();
-                if !s.is_empty() {
-                    buf.extend_from_slice(s.as_bytes());
-                }
-                buf
-            }
-        };
-
-        self.body = Body::DMsg(buf);
         match self.body {
-            Body::DMsg(ref mut v) => v,
-            Body::SMsg(_) => unreachable!(),
+            Body::DMsg => {}
+            Body::SMsg(s) => {
+                self.rsp_buf.extend_from_slice(s.as_bytes());
+                self.body = Body::DMsg;
+            }
+        }
+        self.rsp_buf
+    }
+
+    fn get_body(&mut self) -> Bytes {
+        match self.body {
+            Body::DMsg => self.rsp_buf.take().freeze(),
+            Body::SMsg(s) => Bytes::from_static(s.as_bytes()),
         }
     }
 }
 
-pub fn encode(msg: Response, mut buf: &mut BytesMut) {
-    let length = msg.body.len();
+pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
+    let body = msg.get_body();
     buf.put_slice(b"HTTP/1.1 ");
     buf.put_slice(msg.status_message.code.as_bytes());
     buf.put_u8(b' ');
@@ -94,7 +78,7 @@ pub fn encode(msg: Response, mut buf: &mut BytesMut) {
     buf.put_slice(b"\r\nServer: may\r\nDate: ");
     crate::date::now().put_bytes(buf);
     buf.put_slice(b"\r\nContent-Length: ");
-    itoa::fmt(&mut buf, length).unwrap();
+    itoa::fmt(&mut buf, body.len()).unwrap();
     buf.put_slice(b"\r\n");
 
     for i in 0..msg.headers_len {
@@ -106,7 +90,7 @@ pub fn encode(msg: Response, mut buf: &mut BytesMut) {
     }
 
     buf.put_slice(b"\r\n");
-    buf.put_slice(msg.body.as_bytes());
+    buf.put_slice(&body);
 }
 
 // impl io::Write for the response body

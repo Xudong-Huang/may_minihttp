@@ -9,6 +9,11 @@ use oorandom::Rand32;
 use serde_derive::Serialize;
 
 #[derive(Serialize)]
+struct HeloMessage {
+    message: &'static str,
+}
+
+#[derive(Serialize)]
 struct WorldRow {
     id: i32,
     randomnumber: i32,
@@ -83,20 +88,22 @@ struct Techempower {
 }
 
 impl HttpService for Techempower {
-    fn call(&mut self, req: Request) -> io::Result<Response> {
-        let mut resp = Response::new();
-
+    fn call(&mut self, req: Request, rsp: &mut Response) -> io::Result<()> {
         // Bare-bones router
         match req.path() {
             "/json" => {
-                resp.header("Content-Type", "application/json");
-                let body = resp.body_mut();
+                rsp.header("Content-Type", "application/json");
+                let body = rsp.body_mut();
                 body.reserve(27);
-                let w = BodyWriter(body);
-                serde_json::to_writer(w, &serde_json::json!({"message": "Hello, World!"}))?;
+                serde_json::to_writer(
+                    BodyWriter(body),
+                    &HeloMessage {
+                        message: "Hello, World",
+                    },
+                )?;
             }
             "/plaintext" => {
-                resp.header("Content-Type", "text/plain")
+                rsp.header("Content-Type", "text/plain")
                     .body("Hello, World!");
             }
             "/db" => {
@@ -105,17 +112,17 @@ impl HttpService for Techempower {
                     .db
                     .get_world(random_id)
                     .expect("failed to get random world");
-                resp.header("Content-Type", "application/json");
-                let body = resp.body_mut();
-                let w = BodyWriter(body);
-                serde_json::to_writer(w, &world)?;
+                rsp.header("Content-Type", "application/json");
+                let body = rsp.body_mut();
+                body.reserve(33);
+                serde_json::to_writer(BodyWriter(body), &world)?;
             }
             _ => {
-                resp.status_code("404", "Not Found");
+                rsp.status_code("404", "Not Found");
             }
         }
 
-        Ok(resp)
+        Ok(())
     }
 }
 

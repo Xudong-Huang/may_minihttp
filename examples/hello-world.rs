@@ -8,10 +8,9 @@ use std::io;
 struct HelloWorld;
 
 impl HttpService for HelloWorld {
-    fn call(&mut self, _request: Request) -> io::Result<Response> {
-        let mut resp = Response::new();
-        resp.body("Hello, world!");
-        Ok(resp)
+    fn call(&mut self, _req: Request, rsp: &mut Response) -> io::Result<()> {
+        rsp.body("Hello, world!");
+        Ok(())
     }
 }
 
