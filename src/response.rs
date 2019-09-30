@@ -3,7 +3,7 @@ use std::io;
 use bytes::{BufMut, Bytes, BytesMut};
 
 pub struct Response<'a> {
-    headers: [(&'static str, &'static str); 16],
+    headers: [&'static str; 16],
     headers_len: usize,
     status_message: StatusMessage,
     body: Body,
@@ -39,9 +39,9 @@ impl<'a> Response<'a> {
         self
     }
 
-    pub fn header(&mut self, name: &'static str, val: &'static str) -> &mut Self {
+    pub fn header(&mut self, header: &'static str) -> &mut Self {
         debug_assert!(self.headers_len < 16);
-        *unsafe { self.headers.get_unchecked_mut(self.headers_len) } = (name, val);
+        *unsafe { self.headers.get_unchecked_mut(self.headers_len) } = header;
         self.headers_len += 1;
         self
     }
@@ -73,7 +73,7 @@ pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
     let body = msg.get_body();
     buf.put_slice(b"HTTP/1.1 ");
     buf.put_slice(msg.status_message.code.as_bytes());
-    buf.put_u8(b' ');
+    buf.put_slice(b" ");
     buf.put_slice(msg.status_message.msg.as_bytes());
     buf.put_slice(b"\r\nServer: may\r\nDate: ");
     crate::date::now().put_bytes(buf);
@@ -82,10 +82,8 @@ pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
     buf.put_slice(b"\r\n");
 
     for i in 0..msg.headers_len {
-        let (k, v) = *unsafe { msg.headers.get_unchecked(i) };
-        buf.put_slice(k.as_bytes());
-        buf.put_slice(b": ");
-        buf.put_slice(v.as_bytes());
+        let h = *unsafe { msg.headers.get_unchecked(i) };
+        buf.put_slice(h.as_bytes());
         buf.put_slice(b"\r\n");
     }
 

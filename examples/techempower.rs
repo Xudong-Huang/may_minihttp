@@ -92,7 +92,7 @@ impl HttpService for Techempower {
         // Bare-bones router
         match req.path() {
             "/json" => {
-                rsp.header("Content-Type", "application/json");
+                rsp.header("Content-Type: application/json");
                 let body = rsp.body_mut();
                 body.reserve(27);
                 serde_json::to_writer(
@@ -103,8 +103,7 @@ impl HttpService for Techempower {
                 )?;
             }
             "/plaintext" => {
-                rsp.header("Content-Type", "text/plain")
-                    .body("Hello, World!");
+                rsp.header("Content-Type: text/plain").body("Hello, World!");
             }
             "/db" => {
                 let random_id = self.rng.rand_range(1..10001) as i32;
@@ -112,7 +111,7 @@ impl HttpService for Techempower {
                     .db
                     .get_world(random_id)
                     .expect("failed to get random world");
-                rsp.header("Content-Type", "application/json");
+                rsp.header("Content-Type: application/json");
                 let body = rsp.body_mut();
                 body.reserve(33);
                 serde_json::to_writer(BodyWriter(body), &world)?;
