@@ -2,7 +2,7 @@ use std::io;
 
 use crate::vec_buf::MAX_VEC_BUF;
 use arrayvec::ArrayVec;
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub struct Response<'a> {
     headers: [(&'static str, &'static str); 16],
@@ -78,28 +78,30 @@ pub(crate) fn encode(mut msg: Response) -> ArrayVec<[Bytes; MAX_VEC_BUF]> {
     let body = msg.get_body();
     let mut buf = msg.rsp_buf;
 
-    ret.push(Bytes::from_static(b"HTTP/1.1 "));
-    ret.push(Bytes::from_static(msg.status_message.code.as_bytes()));
-    ret.push(Bytes::from_static(b" "));
-    ret.push(Bytes::from_static(msg.status_message.msg.as_bytes()));
-    ret.push(Bytes::from_static(b"\r\nServer: may\r\nDate: "));
+    buf.put_slice(b"HTTP/1.1 ");
+    buf.put_slice(msg.status_message.code.as_bytes());
+    buf.put_u8(b' ');
+    buf.put_slice(msg.status_message.msg.as_bytes());
+    buf.put_slice(b"\r\nServer: may\r\nDate: ");
     crate::date::now().put_bytes(buf);
-    ret.push(buf.take().freeze());
-    ret.push(Bytes::from_static(b"\r\nContent-Length: "));
+    buf.put_slice(b"\r\nContent-Length: ");
     itoa::fmt(&mut buf, body.len()).unwrap();
-    ret.push(buf.take().freeze());
-    ret.push(Bytes::from_static(b"\r\n"));
+    buf.put_slice(b"\r\n");
 
     for i in 0..msg.headers_len {
         let (k, v) = *unsafe { msg.headers.get_unchecked(i) };
-        ret.push(Bytes::from_static(k.as_bytes()));
-        ret.push(Bytes::from_static(b": "));
-        ret.push(Bytes::from_static(v.as_bytes()));
-        ret.push(Bytes::from_static(b"\r\n"));
+        buf.put_slice(k.as_bytes());
+        buf.put_slice(b": ");
+        buf.put_slice(v.as_bytes());
+        buf.put_slice(b"\r\n");
     }
 
-    ret.push(Bytes::from_static(b"\r\n"));
-    ret.push(body);
+    buf.put_slice(b"\r\n");
+
+    unsafe {
+        ret.push_unchecked(buf.take().freeze());
+        ret.push_unchecked(body);
+    }
     ret
 }
 

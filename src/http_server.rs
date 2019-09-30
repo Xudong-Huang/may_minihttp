@@ -116,17 +116,13 @@ where
         // prepare the reqs
         while let Some(req) = t!(request::decode(&mut req_buf)) {
             let mut rsp = Response::new(&mut rsp_buf);
-            match service.call(req, &mut rsp) {
-                Ok(_) => {}
-                Err(e) => rsp = internal_error_rsp(e, &mut rsp_buf),
-            };
+            if let Err(e) = service.call(req, &mut rsp) {
+                rsp = internal_error_rsp(e, &mut rsp_buf);
+            }
 
             // send the result back to client
             let rsp = VecBufs::new(response::encode(rsp));
             t!(rsp.write_all(&mut stream));
-
-            // take back the result
-            rsp_buf.clear();
         }
     }
 }

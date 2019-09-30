@@ -53,7 +53,9 @@ impl VecBufs {
     // write all data from the vecs to the writer
     pub fn write_all<W: Write>(mut self, writer: &mut W) -> std::io::Result<()> {
         while !self.is_empty() {
-            let n = writer.write_vectored(&self.get_io_slice())?;
+            let io_vec = self.get_io_slice();
+            let n = writer.write_vectored(&io_vec)?;
+            std::mem::forget(io_vec);
             self.advance(n);
         }
         Ok(())
