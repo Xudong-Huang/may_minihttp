@@ -40,6 +40,34 @@ struct WorldRow {
     randomnumber: i32,
 }
 
+#[derive(Serialize)]
+pub struct Fortune {
+    id: i32,
+    message: String,
+}
+
+markup::define! {
+    FortunesTemplate(fortunes: Vec<Fortune>) {
+        {markup::doctype()}
+        html {
+            head {
+                title { "Fortunes" }
+            }
+            body {
+                table {
+                    tr { th { "id" } th { "message" } }
+                    @for item in {fortunes} {
+                        tr {
+                            td { {item.id} }
+                            td { {markup::raw(v_htmlescape::escape(&item.message))} }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct PgConnectionPool {
     idx: AtomicUsize,
     clients: Vec<Arc<PgConnection>>,
@@ -69,6 +97,7 @@ impl PgConnectionPool {
 struct PgConnection {
     client: Client,
     world: Statement,
+    fortune: Statement,
 }
 
 unsafe impl Send for PgConnection {}
@@ -80,7 +109,13 @@ impl PgConnection {
             .prepare("SELECT id, randomnumber FROM world WHERE id=$1")
             .unwrap();
 
-        PgConnection { client, world }
+        let fortune = client.prepare("SELECT id, message FROM fortune").unwrap();
+
+        PgConnection {
+            client,
+            world,
+            fortune,
+        }
     }
 
     fn get_world(&self, random_id: i32) -> Result<WorldRow, may_postgres::Error> {
@@ -152,6 +187,29 @@ impl PgConnection {
         self.client.simple_query(&update)?;
         Ok(worlds)
     }
+
+    fn tell_fortune(&self) -> Result<Vec<Fortune>, may_postgres::Error> {
+        let mut items = Vec::with_capacity(80);
+        items.push(Fortune {
+            id: 0,
+            message: "Additional fortune added at request time.".to_string(),
+        });
+
+        let rows = self
+            .client
+            .query_raw(&self.fortune, utils::slice_iter(&[]))?;
+
+        for row in rows {
+            let r = row?;
+            items.push(Fortune {
+                id: r.get(0),
+                message: r.get(1),
+            });
+        }
+
+        items.sort_by(|it, next| it.message.cmp(&next.message));
+        Ok(items)
+    }
 }
 
 struct Techempower {
@@ -180,6 +238,11 @@ impl HttpService for Techempower {
                 let world = self.db.get_world(random_id).unwrap();
                 rsp.header("Content-Type: application/json");
                 serde_json::to_writer(BodyWriter(rsp.body_mut()), &world)?;
+            }
+            "/fortune" => {
+                let fortunes = self.db.tell_fortune().unwrap();
+                rsp.header("Content-Type: text/html; charset=utf-8");
+                write!(rsp.body_mut(), "{}", FortunesTemplate { fortunes }).unwrap();
             }
             p if p.starts_with("/queries") => {
                 let q = utils::get_query_param(p) as usize;
@@ -226,6 +289,6 @@ fn main() {
     let http_server = HttpServer {
         db_pool: PgConnectionPool::new(db_url, cpus),
     };
-    let server = http_server.start("127.0.0.1:8081").unwrap();
+    let server = http_server.start("0.0.0.0:8081").unwrap();
     server.join().unwrap();
 }
