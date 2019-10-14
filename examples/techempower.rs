@@ -1,13 +1,33 @@
+use std::fmt::Write;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use may_minihttp::{BodyWriter, HttpService, HttpServiceFactory, Request, Response};
-use may_postgres::{self, Client, Statement};
+use may_postgres::{self, Client, RowStream, Statement};
 use oorandom::Rand32;
+use serde_derive::Serialize;
 use smallvec::SmallVec;
 
-use serde_derive::Serialize;
+mod utils {
+    use may_postgres::ToSql;
+    use std::cmp;
+
+    pub fn get_query_param(query: &str) -> u16 {
+        let q = if let Some(pos) = query.find("?q") {
+            query.split_at(pos + 3).1.parse::<u16>().ok().unwrap_or(1)
+        } else {
+            1
+        };
+        cmp::min(500, cmp::max(1, q))
+    }
+
+    pub fn slice_iter<'a>(
+        s: &'a [&'a (dyn ToSql + Sync)],
+    ) -> impl ExactSizeIterator<Item = &'a dyn ToSql> + 'a {
+        s.iter().map(|s| *s as _)
+    }
+}
 
 #[derive(Serialize)]
 struct HeloMessage {
@@ -76,8 +96,7 @@ impl PgConnection {
         num: usize,
         rand: &mut Rand32,
     ) -> Result<Vec<WorldRow>, may_postgres::Error> {
-        let mut queries = SmallVec::<[may_postgres::RowStream; 32]>::new();
-        // let mut queries = Vec::with_capacity(num);
+        let mut queries = SmallVec::<[RowStream; 32]>::new();
         for _ in 0..num {
             let random_id = rand.rand_range(1..10001) as i32;
             queries.push(
@@ -96,6 +115,41 @@ impl PgConnection {
                 None => unreachable!(),
             }
         }
+        Ok(worlds)
+    }
+
+    fn updates(&self, num: usize, rand: &mut Rand32) -> Result<Vec<WorldRow>, may_postgres::Error> {
+        let mut queries = SmallVec::<[RowStream; 32]>::new();
+        for _ in 0..num {
+            let random_id = rand.rand_range(1..10001) as i32;
+            queries.push(
+                self.client
+                    .query_raw(&self.world, utils::slice_iter(&[&random_id]))?,
+            );
+        }
+
+        let mut worlds = Vec::with_capacity(num);
+        for mut q in queries {
+            match q.next().transpose()? {
+                Some(row) => worlds.push(WorldRow {
+                    id: row.get(0),
+                    randomnumber: row.get(1),
+                }),
+                None => unreachable!(),
+            }
+        }
+
+        let mut update = String::with_capacity(120 + 12 * num);
+        update.push_str("UPDATE world SET randomnumber = temp.randomnumber FROM (VALUES ");
+
+        for w in &mut worlds {
+            w.randomnumber = rand.rand_range(1..10001) as i32;
+            let _ = write!(&mut update, "({}, {}),", w.id, w.randomnumber);
+        }
+        update.pop();
+        update.push_str(" ORDER BY 1) AS temp(id, randomnumber) WHERE temp.id = world.id");
+
+        self.client.simple_query(&update)?;
         Ok(worlds)
     }
 }
@@ -130,6 +184,12 @@ impl HttpService for Techempower {
             p if p.starts_with("/queries") => {
                 let q = utils::get_query_param(p) as usize;
                 let worlds = self.db.get_worlds(q, &mut self.rng).unwrap();
+                rsp.header("Content-Type: application/json");
+                serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
+            }
+            p if p.starts_with("/updates") => {
+                let q = utils::get_query_param(p) as usize;
+                let worlds = self.db.updates(q, &mut self.rng).unwrap();
                 rsp.header("Content-Type: application/json");
                 serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
             }
@@ -168,22 +228,4 @@ fn main() {
     };
     let server = http_server.start("127.0.0.1:8081").unwrap();
     server.join().unwrap();
-}
-
-mod utils {
-    use std::cmp;
-    pub fn get_query_param(query: &str) -> u16 {
-        let q = if let Some(pos) = query.find("?q") {
-            query.split_at(pos + 3).1.parse::<u16>().ok().unwrap_or(1)
-        } else {
-            1
-        };
-        cmp::min(500, cmp::max(1, q))
-    }
-
-    pub fn slice_iter<'a>(
-        s: &'a [&'a (dyn may_postgres::ToSql + Sync)],
-    ) -> impl ExactSizeIterator<Item = &'a dyn may_postgres::ToSql> + 'a {
-        s.iter().map(|s| *s as _)
-    }
 }
