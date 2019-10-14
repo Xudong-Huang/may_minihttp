@@ -5,6 +5,7 @@ use std::sync::Arc;
 use may_minihttp::{BodyWriter, HttpService, HttpServiceFactory, Request, Response};
 use may_postgres::{self, Client, Statement};
 use oorandom::Rand32;
+use smallvec::SmallVec;
 
 use serde_derive::Serialize;
 
@@ -63,22 +64,39 @@ impl PgConnection {
     }
 
     fn get_world(&self, random_id: i32) -> Result<WorldRow, may_postgres::Error> {
-        let mut rows = self.client.query(&self.world, &[&random_id]);
-        let row = match rows.next() {
-            Some(r) => r?,
-            None => {
-                dbg!(random_id);
-                return Ok(WorldRow {
-                    id: 0,
-                    randomnumber: 0,
-                });
-            }
-        };
-
+        let row = self.client.query_one(&self.world, &[&random_id])?;
         Ok(WorldRow {
             id: row.get(0),
             randomnumber: row.get(1),
         })
+    }
+
+    fn get_worlds(
+        &self,
+        num: usize,
+        rand: &mut Rand32,
+    ) -> Result<Vec<WorldRow>, may_postgres::Error> {
+        let mut queries = SmallVec::<[may_postgres::RowStream; 32]>::new();
+        // let mut queries = Vec::with_capacity(num);
+        for _ in 0..num {
+            let random_id = rand.rand_range(1..10001) as i32;
+            queries.push(
+                self.client
+                    .query_raw(&self.world, utils::slice_iter(&[&random_id]))?,
+            );
+        }
+
+        let mut worlds = Vec::with_capacity(num);
+        for mut q in queries {
+            match q.next().transpose()? {
+                Some(row) => worlds.push(WorldRow {
+                    id: row.get(0),
+                    randomnumber: row.get(1),
+                }),
+                None => unreachable!(),
+            }
+        }
+        Ok(worlds)
     }
 }
 
@@ -105,12 +123,15 @@ impl HttpService for Techempower {
             }
             "/db" => {
                 let random_id = self.rng.rand_range(1..10001) as i32;
-                let world = self
-                    .db
-                    .get_world(random_id)
-                    .expect("failed to get random world");
+                let world = self.db.get_world(random_id).unwrap();
                 rsp.header("Content-Type: application/json");
                 serde_json::to_writer(BodyWriter(rsp.body_mut()), &world)?;
+            }
+            p if p.starts_with("/queries") => {
+                let q = utils::get_query_param(p) as usize;
+                let worlds = self.db.get_worlds(q, &mut self.rng).unwrap();
+                rsp.header("Content-Type: application/json");
+                serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
             }
             _ => {
                 rsp.status_code("404", "Not Found");
@@ -147,4 +168,22 @@ fn main() {
     };
     let server = http_server.start("127.0.0.1:8081").unwrap();
     server.join().unwrap();
+}
+
+mod utils {
+    use std::cmp;
+    pub fn get_query_param(query: &str) -> u16 {
+        let q = if let Some(pos) = query.find("?q") {
+            query.split_at(pos + 3).1.parse::<u16>().ok().unwrap_or(1)
+        } else {
+            1
+        };
+        cmp::min(500, cmp::max(1, q))
+    }
+
+    pub fn slice_iter<'a>(
+        s: &'a [&'a (dyn may_postgres::ToSql + Sync)],
+    ) -> impl ExactSizeIterator<Item = &'a dyn may_postgres::ToSql> + 'a {
+        s.iter().map(|s| *s as _)
+    }
 }
