@@ -1,3 +1,4 @@
+use bytes::BufMut;
 use may_minihttp::{HttpServer, HttpService, Request, Response};
 use std::io;
 
@@ -9,7 +10,7 @@ struct HelloWorld;
 
 impl HttpService for HelloWorld {
     fn call(&mut self, _req: Request, rsp: &mut Response) -> io::Result<()> {
-        rsp.body("Hello, world!");
+        rsp.get_body().put_slice(b"Hello, world!");
         Ok(())
     }
 }

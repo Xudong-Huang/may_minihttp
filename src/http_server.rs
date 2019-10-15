@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
 
 use crate::request::{self, Request};
-use crate::response::{self, Response};
+use crate::response::Response;
 use bytes::{BufMut, BytesMut};
 use may::net::TcpListener;
 use may::{coroutine, go};
@@ -74,11 +74,10 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
 
 fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
     error!("error in service: err = {:?}", e);
-    buf.clear();
     let mut err_rsp = Response::new(buf);
     err_rsp.status_code("500", "Internal Server Error");
     err_rsp
-        .body_mut()
+        .get_body()
         .extend_from_slice(e.description().as_bytes());
     err_rsp
 }
@@ -95,7 +94,6 @@ where
 {
     let mut req_buf = BytesMut::with_capacity(4096 * 8);
     let mut rsp_buf = BytesMut::with_capacity(4096 * 8);
-    let mut body_buf = BytesMut::with_capacity(4096 * 8);
     loop {
         // read the socket for reqs
         if req_buf.remaining_mut() < 1024 {
@@ -115,11 +113,14 @@ where
 
         // prepare the reqs
         while let Some(req) = t!(request::decode(&mut req_buf)) {
-            let mut rsp = Response::new(&mut body_buf);
+            let mut rsp = Response::new(&mut rsp_buf);
+
             if let Err(e) = service.call(req, &mut rsp) {
-                rsp = internal_error_rsp(e, &mut body_buf);
+                rsp.reset_buf();
+                rsp = internal_error_rsp(e, &mut rsp_buf);
             }
-            response::encode(rsp, &mut rsp_buf);
+
+            rsp.encode();
         }
 
         // send the result back to client

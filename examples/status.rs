@@ -1,3 +1,4 @@
+use bytes::BufMut;
 use std::io;
 
 use may_minihttp::{HttpServer, HttpService, Request, Response};
@@ -15,7 +16,7 @@ impl HttpService for StatusService {
         };
 
         rsp.status_code(code, message);
-        rsp.body(message);
+        rsp.get_body().put(message);
         Ok(())
     }
 }

@@ -3,7 +3,8 @@ use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use may_minihttp::{BodyWriter, HttpService, HttpServiceFactory, Request, Response};
+use bytes::BufMut;
+use may_minihttp::{HttpService, HttpServiceFactory, Request, Response};
 use may_postgres::{self, Client, RowStream, Statement};
 use oorandom::Rand32;
 use serde_derive::Serialize;
@@ -223,38 +224,41 @@ impl HttpService for Techempower {
         match req.path() {
             "/json" => {
                 rsp.header("Content-Type: application/json");
+                let mut body = rsp.get_body();
                 serde_json::to_writer(
-                    BodyWriter(rsp.body_mut()),
+                    &mut body,
                     &HeloMessage {
                         message: "Hello, World",
                     },
                 )?;
             }
             "/plaintext" => {
-                rsp.header("Content-Type: text/plain").body("Hello, World!");
+                rsp.header("Content-Type: text/plain")
+                    .get_body()
+                    .put_slice(b"Hello, World!");
             }
             "/db" => {
                 let random_id = self.rng.rand_range(1..10001) as i32;
                 let world = self.db.get_world(random_id).unwrap();
                 rsp.header("Content-Type: application/json");
-                serde_json::to_writer(BodyWriter(rsp.body_mut()), &world)?;
+                serde_json::to_writer(rsp.get_body(), &world)?;
             }
             "/fortune" => {
                 let fortunes = self.db.tell_fortune().unwrap();
                 rsp.header("Content-Type: text/html; charset=utf-8");
-                write!(rsp.body_mut(), "{}", FortunesTemplate { fortunes }).unwrap();
+                write!(rsp.get_body(), "{}", FortunesTemplate { fortunes }).unwrap();
             }
             p if p.starts_with("/queries") => {
                 let q = utils::get_query_param(p) as usize;
                 let worlds = self.db.get_worlds(q, &mut self.rng).unwrap();
                 rsp.header("Content-Type: application/json");
-                serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
+                serde_json::to_writer(rsp.get_body(), &worlds)?;
             }
             p if p.starts_with("/updates") => {
                 let q = utils::get_query_param(p) as usize;
                 let worlds = self.db.updates(q, &mut self.rng).unwrap();
                 rsp.header("Content-Type: application/json");
-                serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
+                serde_json::to_writer(rsp.get_body(), &worlds)?;
             }
             _ => {
                 rsp.status_code("404", "Not Found");
