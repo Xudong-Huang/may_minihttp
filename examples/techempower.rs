@@ -213,8 +213,8 @@ impl PgConnection {
 }
 
 struct Techempower {
-    db: Arc<PgConnection>,
-    rng: Rand32,
+    // db: Arc<PgConnection>,
+    // rng: Rand32,
 }
 
 impl HttpService for Techempower {
@@ -233,29 +233,29 @@ impl HttpService for Techempower {
             "/plaintext" => {
                 rsp.header("Content-Type: text/plain").body("Hello, World!");
             }
-            "/db" => {
-                let random_id = self.rng.rand_range(1..10001) as i32;
-                let world = self.db.get_world(random_id).unwrap();
-                rsp.header("Content-Type: application/json");
-                serde_json::to_writer(BodyWriter(rsp.body_mut()), &world)?;
-            }
-            "/fortune" => {
-                let fortunes = self.db.tell_fortune().unwrap();
-                rsp.header("Content-Type: text/html; charset=utf-8");
-                write!(rsp.body_mut(), "{}", FortunesTemplate { fortunes }).unwrap();
-            }
-            p if p.starts_with("/queries") => {
-                let q = utils::get_query_param(p) as usize;
-                let worlds = self.db.get_worlds(q, &mut self.rng).unwrap();
-                rsp.header("Content-Type: application/json");
-                serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
-            }
-            p if p.starts_with("/updates") => {
-                let q = utils::get_query_param(p) as usize;
-                let worlds = self.db.updates(q, &mut self.rng).unwrap();
-                rsp.header("Content-Type: application/json");
-                serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
-            }
+            // "/db" => {
+            //     let random_id = self.rng.rand_range(1..10001) as i32;
+            //     let world = self.db.get_world(random_id).unwrap();
+            //     rsp.header("Content-Type: application/json");
+            //     serde_json::to_writer(BodyWriter(rsp.body_mut()), &world)?;
+            // }
+            // "/fortune" => {
+            //     let fortunes = self.db.tell_fortune().unwrap();
+            //     rsp.header("Content-Type: text/html; charset=utf-8");
+            //     write!(rsp.body_mut(), "{}", FortunesTemplate { fortunes }).unwrap();
+            // }
+            // p if p.starts_with("/queries") => {
+            //     let q = utils::get_query_param(p) as usize;
+            //     let worlds = self.db.get_worlds(q, &mut self.rng).unwrap();
+            //     rsp.header("Content-Type: application/json");
+            //     serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
+            // }
+            // p if p.starts_with("/updates") => {
+            //     let q = utils::get_query_param(p) as usize;
+            //     let worlds = self.db.updates(q, &mut self.rng).unwrap();
+            //     rsp.header("Content-Type: application/json");
+            //     serde_json::to_writer(BodyWriter(rsp.body_mut()), &worlds)?;
+            // }
             _ => {
                 rsp.status_code("404", "Not Found");
             }
@@ -266,16 +266,17 @@ impl HttpService for Techempower {
 }
 
 struct HttpServer {
-    db_pool: PgConnectionPool,
+    // db_pool: PgConnectionPool,
 }
 
 impl HttpServiceFactory for HttpServer {
     type Service = Techempower;
 
     fn new_service(&self) -> Self::Service {
-        let (db, idx) = self.db_pool.get_connection();
-        let rng = Rand32::new(idx as u64);
-        Techempower { db, rng }
+        // let (db, idx) = self.db_pool.get_connection();
+        // let rng = Rand32::new(idx as u64);
+        // Techempower { db, rng }
+        Techempower {}
     }
 }
 
@@ -285,9 +286,9 @@ fn main() {
         .set_io_workers(cpus)
         .set_workers(cpus)
         .set_pool_capacity(10000);
-    let db_url = "postgres://benchmarkdbuser:benchmarkdbpass@127.0.0.1/hello_world";
+    // let db_url = "postgres://benchmarkdbuser:benchmarkdbpass@127.0.0.1/hello_world";
     let http_server = HttpServer {
-        db_pool: PgConnectionPool::new(db_url, cpus),
+        // db_pool: PgConnectionPool::new(db_url, cpus),
     };
     let server = http_server.start("0.0.0.0:8081").unwrap();
     server.join().unwrap();
