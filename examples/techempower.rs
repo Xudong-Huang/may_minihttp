@@ -224,9 +224,8 @@ impl HttpService for Techempower {
         match req.path() {
             "/json" => {
                 rsp.header("Content-Type: application/json");
-                let mut body = rsp.get_body();
                 serde_json::to_writer(
-                    &mut body,
+                    rsp.get_body(),
                     &HeloMessage {
                         message: "Hello, World",
                     },

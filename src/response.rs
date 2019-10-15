@@ -61,7 +61,8 @@ impl<'a> Response<'a> {
     fn encode_header(&mut self) {
         self.check_point = self.buf.len();
         if self.status_message.msg == "Ok" {
-            self.buf.put_slice(b"HTTP/1.1 200 Ok\r\nServer: may\r\nDate: ");
+            self.buf
+                .put_slice(b"HTTP/1.1 200 Ok\r\nServer: may\r\nDate: ");
         } else {
             self.buf.put_slice(b"HTTP/1.1 ");
             self.buf.put_slice(self.status_message.code.as_bytes());
