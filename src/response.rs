@@ -84,23 +84,26 @@ impl<'a> Response<'a> {
 }
 
 pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
-    buf.put_slice(b"HTTP/1.1 ");
-    buf.put_slice(msg.status_message.code.as_bytes());
-    buf.put_slice(b" ");
-    buf.put_slice(msg.status_message.msg.as_bytes());
-    buf.put_slice(b"\r\nServer: may\r\nDate: ");
+    if msg.status_message.msg == "Ok" {
+        buf.put_slice(b"HTTP/1.1 200 Ok\r\nServer: may\r\nDate: ");
+    } else {
+        buf.put_slice(b"HTTP/1.1 ");
+        buf.put_slice(msg.status_message.code.as_bytes());
+        buf.put_slice(b" ");
+        buf.put_slice(msg.status_message.msg.as_bytes());
+        buf.put_slice(b"\r\nServer: may\r\nDate: ");
+    }
     crate::date::now().put_bytes(buf);
     buf.put_slice(b"\r\nContent-Length: ");
     itoa::fmt(&mut buf, msg.body_len()).unwrap();
-    buf.put_slice(b"\r\n");
 
     for i in 0..msg.headers_len {
         let h = *unsafe { msg.headers.get_unchecked(i) };
-        buf.put_slice(h.as_bytes());
         buf.put_slice(b"\r\n");
+        buf.put_slice(h.as_bytes());
     }
 
-    buf.put_slice(b"\r\n");
+    buf.put_slice(b"\r\n\r\n");
     buf.put_slice(msg.get_body());
     msg.clear_body();
 }
