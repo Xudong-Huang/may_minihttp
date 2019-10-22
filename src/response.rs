@@ -93,7 +93,7 @@ pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
         buf.put_slice(msg.status_message.msg.as_bytes());
         buf.put_slice(b"\r\nServer: may\r\nDate: ");
     }
-    crate::date::now().put_bytes(buf);
+    crate::date::set_date(buf);
     buf.put_slice(b"\r\nContent-Length: ");
     itoa::fmt(&mut buf, msg.body_len()).unwrap();
 

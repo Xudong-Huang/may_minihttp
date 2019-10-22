@@ -6,7 +6,7 @@ use std::sync::Arc;
 use may_minihttp::{BodyWriter, HttpService, HttpServiceFactory, Request, Response};
 use may_postgres::{self, Client, RowStream, Statement};
 use oorandom::Rand32;
-use serde_derive::Serialize;
+use serde::Serialize;
 use smallvec::SmallVec;
 
 mod utils {

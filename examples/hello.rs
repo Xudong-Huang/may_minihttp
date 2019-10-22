@@ -25,7 +25,6 @@ impl HttpServiceFactory for HelloWorldFac {
 }
 
 fn main() {
-    may::config().set_io_workers(1);
     env_logger::init();
     let server = HelloWorldFac.start("127.0.0.1:8080").unwrap();
     server.wait();

@@ -14,7 +14,6 @@ impl HttpService for HelloJson {
 }
 
 fn main() {
-    may::config().set_io_workers(2);
     let server = HttpServer(HelloJson).start("127.0.0.1:8080").unwrap();
     server.wait();
 }

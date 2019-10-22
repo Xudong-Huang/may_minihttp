@@ -1,97 +1,62 @@
-use std::cell::UnsafeCell;
 use std::fmt::{self, Write};
 use std::str;
+use std::sync::Arc;
 
 use bytes::{BufMut, BytesMut};
-use time::{self, Duration};
+use lazy_static::lazy_static;
+use rcu_cell::RcuCell;
 
-pub struct Now;
+// "Sun, 06 Nov 1994 08:49:37 GMT".len()
+const DATE_VALUE_LENGTH: usize = 29;
 
-/// Returns a struct, which when formatted, renders an appropriate `Date` header
-/// value.
-pub fn now() -> Now {
-    Now
+lazy_static! {
+    static ref CURRENT_DATE: Arc<RcuCell<Date>> = {
+        let date = Arc::new(RcuCell::new(Some(Date::new())));
+        let date_clone = date.clone();
+        may::go!(move || loop {
+            may::coroutine::sleep(std::time::Duration::from_millis(500));
+            date_clone.try_lock().unwrap().update(Some(Date::new()));
+        });
+        date
+    };
 }
 
-// Gee Alex, doesn't this seem like premature optimization. Well you see there
-// Billy, you're absolutely correct! If your server is *bottlenecked* on
-// rendering the `Date` header, well then boy do I have news for you, you don't
-// need this optimization.
-//
-// In all seriousness, though, a simple "hello world" benchmark which just sends
-// back literally "hello world" with standard headers actually is bottlenecked
-// on rendering a date into a byte buffer. Since it was at the top of a profile,
-// and this was done for some competitive benchmarks, this module was written.
-//
-// Just to be clear, though, I was not intending on doing this because it really
-// does seem kinda absurd, but it was done by someone else [1], so I blame them!
-// :)
-//
-// [1]: https://github.com/rapidoid/rapidoid/blob/f1c55c0555007e986b5d069fe1086e6d09933f7b/rapidoid-commons/src/main/java/org/rapidoid/commons/Dates.java#L48-L66
-
-struct LastRenderedNow {
-    bytes: [u8; 128],
-    amt: usize,
-    next_update: time::Timespec,
+#[doc(hidden)]
+pub fn set_date(dst: &mut BytesMut) {
+    dst.put_slice(CURRENT_DATE.read().unwrap().as_bytes());
 }
 
-thread_local!(static LAST: UnsafeCell<LastRenderedNow> = UnsafeCell::new(LastRenderedNow {
-    bytes: [0; 128],
-    amt: 0,
-    next_update: time::Timespec::new(0, 0),
-}));
+struct Date {
+    bytes: [u8; DATE_VALUE_LENGTH],
+    pos: usize,
+}
 
-impl fmt::Display for Now {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        LAST.with(|cache| {
-            let cache = unsafe { &mut *cache.get() };
-            let now = time::get_time();
-            if now > cache.next_update {
-                cache.update(now);
-            }
-            f.write_str(cache.buffer())
-        })
+impl Date {
+    fn new() -> Date {
+        let mut date = Date {
+            bytes: [0; DATE_VALUE_LENGTH],
+            pos: 0,
+        };
+        date.update();
+        date
+    }
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    fn update(&mut self) {
+        self.pos = 0;
+        write!(self, "{}", time::at_utc(time::get_time()).rfc822()).unwrap();
     }
 }
 
-impl Now {
-    pub fn put_bytes(&self, buf: &mut BytesMut) {
-        LAST.with(|cache| {
-            let cache = unsafe { &mut *cache.get() };
-            let now = time::get_time();
-            if now > cache.next_update {
-                cache.update(now);
-            }
-            buf.put_slice(cache.raw_buffer())
-        })
-    }
-}
-
-impl LastRenderedNow {
-    fn buffer(&self) -> &str {
-        unsafe { str::from_utf8_unchecked(&self.bytes[..self.amt]) }
-    }
-
-    fn raw_buffer(&self) -> &[u8] {
-        &self.bytes[..self.amt]
-    }
-
-    fn update(&mut self, now: time::Timespec) {
-        self.amt = 0;
-        write!(LocalBuffer(self), "{}", time::at(now).rfc822()).unwrap();
-        self.next_update = now + Duration::seconds(1);
-        self.next_update.nsec = 0;
-    }
-}
-
-struct LocalBuffer<'a>(&'a mut LastRenderedNow);
-
-impl<'a> fmt::Write for LocalBuffer<'a> {
+impl fmt::Write for Date {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        let start = self.0.amt;
-        let end = start + s.len();
-        self.0.bytes[start..end].copy_from_slice(s.as_bytes());
-        self.0.amt += s.len();
+        let len = s.len();
+        self.bytes[self.pos..self.pos + len].copy_from_slice(s.as_bytes());
+        self.pos += len;
         Ok(())
     }
 }
