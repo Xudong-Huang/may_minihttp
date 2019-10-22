@@ -281,10 +281,7 @@ impl HttpServiceFactory for HttpServer {
 
 fn main() {
     let cpus = num_cpus::get();
-    may::config()
-        .set_io_workers(cpus)
-        .set_workers(cpus)
-        .set_pool_capacity(10000);
+    may::config().set_pool_capacity(10000);
     let db_url = "postgres://benchmarkdbuser:benchmarkdbpass@127.0.0.1/hello_world";
     let http_server = HttpServer {
         db_pool: PgConnectionPool::new(db_url, cpus),

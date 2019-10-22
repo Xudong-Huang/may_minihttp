@@ -29,7 +29,3 @@ may_postgres = { git = "https://github.com/Xudong-Huang/may_postgres.git" }
 lto = true
 opt-level = 3
 codegen-units = 1
-
-
-[patch.crates-io]
-may = { git = "https://github.com/Xudong-Huang/may.git" }
