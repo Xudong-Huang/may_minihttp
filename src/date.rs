@@ -1,62 +1,76 @@
+use std::cell::UnsafeCell;
 use std::fmt::{self, Write};
-use std::str;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use bytes::{BufMut, BytesMut};
 use lazy_static::lazy_static;
-use rcu_cell::RcuCell;
 
 // "Sun, 06 Nov 1994 08:49:37 GMT".len()
 const DATE_VALUE_LENGTH: usize = 29;
 
 lazy_static! {
-    static ref CURRENT_DATE: Arc<RcuCell<Date>> = {
-        let date = Arc::new(RcuCell::new(Some(Date::new())));
+    static ref CURRENT_DATE: Arc<DataWrap> = {
+        let date = Arc::new(DataWrap(UnsafeCell::new(Date::new())));
         let date_clone = date.clone();
         may::go!(move || loop {
             may::coroutine::sleep(std::time::Duration::from_millis(500));
-            date_clone.try_lock().unwrap().update(Some(Date::new()));
+            unsafe { &mut *(date_clone.0).get() }.update();
         });
         date
     };
 }
 
+struct DataWrap(UnsafeCell<Date>);
+unsafe impl Sync for DataWrap {}
+
 #[doc(hidden)]
 pub fn set_date(dst: &mut BytesMut) {
-    dst.put_slice(CURRENT_DATE.read().unwrap().as_bytes());
+    let date = unsafe { &*CURRENT_DATE.0.get() };
+    dst.put_slice(date.as_bytes());
 }
 
 struct Date {
-    bytes: [u8; DATE_VALUE_LENGTH],
-    pos: usize,
+    bytes: [[u8; DATE_VALUE_LENGTH]; 2],
+    pos: [usize; 2],
+    cnt: AtomicUsize,
 }
 
 impl Date {
     fn new() -> Date {
         let mut date = Date {
-            bytes: [0; DATE_VALUE_LENGTH],
-            pos: 0,
+            bytes: [[0; DATE_VALUE_LENGTH], [0; DATE_VALUE_LENGTH]],
+            pos: [0; 2],
+            cnt: AtomicUsize::new(0),
         };
+        date.update();
+        date.cnt.store(1, Ordering::Relaxed);
         date.update();
         date
     }
 
     #[inline]
     fn as_bytes(&self) -> &[u8] {
-        &self.bytes
+        let id = self.cnt.load(Ordering::Acquire) & 1;
+        unsafe { self.bytes.get_unchecked(id) }
     }
 
     fn update(&mut self) {
-        self.pos = 0;
+        let id = self.cnt.load(Ordering::Acquire) + 1;
+        let idx = id & 1;
+        self.pos[idx] = 0;
         write!(self, "{}", time::at_utc(time::get_time()).rfc822()).unwrap();
+        self.cnt.store(id, Ordering::Release);
     }
 }
 
 impl fmt::Write for Date {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        let id = self.cnt.load(Ordering::Relaxed) + 1;
+        let idx = id & 1;
         let len = s.len();
-        self.bytes[self.pos..self.pos + len].copy_from_slice(s.as_bytes());
-        self.pos += len;
+        self.bytes[idx][self.pos[idx]..self.pos[idx] + len].copy_from_slice(s.as_bytes());
+        self.pos[idx] += len;
         Ok(())
     }
 }
