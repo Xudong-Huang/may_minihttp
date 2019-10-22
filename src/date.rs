@@ -27,8 +27,9 @@ unsafe impl Sync for DataWrap {}
 #[doc(hidden)]
 pub fn set_date(dst: &mut BytesMut) {
     let date = unsafe { &*CURRENT_DATE.0.get() };
-    let dst = unsafe { dst.bytes_mut() };
-    dst[0..DATE_VALUE_LENGTH].copy_from_slice(date.as_bytes());
+    let buf = unsafe { dst.bytes_mut() };
+    buf[0..DATE_VALUE_LENGTH].copy_from_slice(date.as_bytes());
+    unsafe { dst.advance_mut(DATE_VALUE_LENGTH) };
 }
 
 struct Date {
