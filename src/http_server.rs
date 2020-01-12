@@ -1,6 +1,5 @@
 //! http server implementation on top of `MAY`
 
-use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
 
@@ -79,7 +78,7 @@ fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
     err_rsp.status_code("500", "Internal Server Error");
     err_rsp
         .body_mut()
-        .extend_from_slice(e.description().as_bytes());
+        .extend_from_slice(e.to_string().as_bytes());
     err_rsp
 }
 
@@ -103,7 +102,7 @@ where
         }
 
         let n = {
-            let read_buf = unsafe { req_buf.bytes_mut() };
+            let read_buf = unsafe { &mut *(req_buf.bytes_mut() as *mut _ as *mut [u8]) };
             t!(stream.read(read_buf))
         };
         //connection was closed

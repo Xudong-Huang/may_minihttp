@@ -27,7 +27,7 @@ unsafe impl Sync for DataWrap {}
 #[doc(hidden)]
 pub fn set_date(dst: &mut BytesMut) {
     let date = unsafe { &*CURRENT_DATE.0.get() };
-    let buf = unsafe { dst.bytes_mut() };
+    let buf = unsafe { &mut *(dst.bytes_mut() as *mut _ as *mut [u8]) };
     buf[0..DATE_VALUE_LENGTH].copy_from_slice(date.as_bytes());
     unsafe { dst.advance_mut(DATE_VALUE_LENGTH) };
 }
@@ -61,7 +61,8 @@ impl Date {
         let id = self.cnt.load(Ordering::Acquire) + 1;
         let idx = id & 1;
         self.pos[idx] = 0;
-        write!(self, "{}", time::at_utc(time::get_time()).rfc822()).unwrap();
+        // write!(self, "{}", time::at_utc(time::get_time()).rfc822()).unwrap();
+        write!(self, "{}", time::Time::now().format("%a, %d %b %Y %T GMT")).unwrap();
         self.cnt.store(id, Ordering::Release);
     }
 }
