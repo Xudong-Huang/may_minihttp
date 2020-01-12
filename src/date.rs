@@ -61,8 +61,12 @@ impl Date {
         let id = self.cnt.load(Ordering::Acquire) + 1;
         let idx = id & 1;
         self.pos[idx] = 0;
-        // write!(self, "{}", time::at_utc(time::get_time()).rfc822()).unwrap();
-        write!(self, "{}", time::Time::now().format("%a, %d %b %Y %T GMT")).unwrap();
+        write!(
+            self,
+            "{}",
+            time::OffsetDateTime::now().format("%a, %d %b %Y %T GMT")
+        )
+        .unwrap();
         self.cnt.store(id, Ordering::Release);
     }
 }
