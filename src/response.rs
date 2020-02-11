@@ -84,6 +84,8 @@ impl<'a> Response<'a> {
 }
 
 pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
+    // additional 200 bytes for headers, this should never happended
+    buf.reserve(msg.body_len() + 200);
     if msg.status_message.msg == "Ok" {
         buf.put_slice(b"HTTP/1.1 200 Ok\r\nServer: may\r\nDate: ");
     } else {

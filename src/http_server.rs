@@ -93,11 +93,11 @@ where
     T: HttpService,
 {
     let mut req_buf = BytesMut::with_capacity(4096 * 8);
-    let mut rsp_buf = BytesMut::with_capacity(4096 * 8);
+    let mut rsp_buf = BytesMut::with_capacity(4096 * 32);
     let mut body_buf = BytesMut::with_capacity(4096 * 8);
     loop {
         // read the socket for reqs
-        if req_buf.remaining_mut() < 1024 {
+        if req_buf.capacity() - req_buf.len() < 512 {
             req_buf.reserve(4096 * 8);
         }
 
