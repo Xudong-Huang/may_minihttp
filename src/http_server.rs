@@ -119,6 +119,11 @@ where
                 rsp = internal_error_rsp(e, &mut body_buf);
             }
             response::encode(rsp, &mut rsp_buf);
+            if rsp_buf.len() > 1024 {
+                // send the result back to client
+                t!(stream.write_all(rsp_buf.as_ref()));
+                rsp_buf.clear();
+            }
         }
 
         // send the result back to client
