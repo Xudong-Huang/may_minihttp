@@ -6,7 +6,7 @@ use std::net::ToSocketAddrs;
 use crate::request::{self, Request};
 use crate::response::{self, Response};
 use bytes::{BufMut, BytesMut};
-use may::net::TcpListener;
+use may::net::{TcpListener, TcpStream};
 use may::{coroutine, go};
 
 macro_rules! t {
@@ -87,11 +87,7 @@ fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
 ///
 pub struct HttpServer<T>(pub T);
 
-fn each_connection_loop<S, T>(mut stream: S, mut service: T)
-where
-    S: Read + Write,
-    T: HttpService,
-{
+fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
     let mut req_buf = BytesMut::with_capacity(4096 * 8);
     let mut rsp_buf = BytesMut::with_capacity(4096 * 32);
     let mut body_buf = BytesMut::with_capacity(4096 * 8);
@@ -119,11 +115,6 @@ where
                 rsp = internal_error_rsp(e, &mut body_buf);
             }
             response::encode(rsp, &mut rsp_buf);
-            if rsp_buf.len() > 1024 {
-                // send the result back to client
-                t!(stream.write_all(rsp_buf.as_ref()));
-                rsp_buf.clear();
-            }
         }
 
         // send the result back to client

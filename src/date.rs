@@ -26,10 +26,12 @@ unsafe impl Sync for DataWrap {}
 
 #[doc(hidden)]
 pub fn set_date(dst: &mut BytesMut) {
-    let date = unsafe { &*CURRENT_DATE.0.get() };
-    let buf = unsafe { &mut *(dst.bytes_mut() as *mut _ as *mut [u8]) };
-    buf[0..DATE_VALUE_LENGTH].copy_from_slice(date.as_bytes());
-    unsafe { dst.advance_mut(DATE_VALUE_LENGTH) };
+    unsafe {
+        let date = &*CURRENT_DATE.0.get();
+        let buf = &mut *(dst.bytes_mut() as *mut _ as *mut [u8]);
+        buf[0..DATE_VALUE_LENGTH].copy_from_slice(date.as_bytes());
+        dst.advance_mut(DATE_VALUE_LENGTH)
+    }
 }
 
 struct Date {
@@ -53,12 +55,12 @@ impl Date {
 
     #[inline]
     fn as_bytes(&self) -> &[u8] {
-        let id = self.cnt.load(Ordering::Acquire) & 1;
+        let id = self.cnt.load(Ordering::Relaxed) & 1;
         unsafe { self.bytes.get_unchecked(id) }
     }
 
     fn update(&mut self) {
-        let id = self.cnt.load(Ordering::Acquire) + 1;
+        let id = self.cnt.load(Ordering::Relaxed) + 1;
         let idx = id & 1;
         self.pos[idx] = 0;
         write!(
@@ -67,7 +69,7 @@ impl Date {
             time::OffsetDateTime::now().format("%a, %d %b %Y %H:%M:%S GMT")
         )
         .unwrap();
-        self.cnt.store(id, Ordering::Release);
+        self.cnt.store(id, Ordering::Relaxed);
     }
 }
 
