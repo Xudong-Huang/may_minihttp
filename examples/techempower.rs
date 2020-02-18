@@ -10,7 +10,7 @@ use serde::Serialize;
 use smallvec::SmallVec;
 
 mod utils {
-    use may_postgres::ToSql;
+    use may_postgres::types::ToSql;
     use std::cmp;
 
     pub fn get_query_param(query: &str) -> u16 {
