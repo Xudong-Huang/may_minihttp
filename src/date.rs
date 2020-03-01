@@ -3,7 +3,7 @@ use std::fmt::{self, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 use lazy_static::lazy_static;
 
 // "Sun, 06 Nov 1994 08:49:37 GMT".len()
@@ -26,12 +26,8 @@ unsafe impl Sync for DataWrap {}
 
 #[doc(hidden)]
 pub fn set_date(dst: &mut BytesMut) {
-    unsafe {
-        let date = &*CURRENT_DATE.0.get();
-        let buf = &mut *(dst.bytes_mut() as *mut _ as *mut [u8]);
-        buf[0..DATE_VALUE_LENGTH].copy_from_slice(date.as_bytes());
-        dst.advance_mut(DATE_VALUE_LENGTH)
-    }
+    let date = unsafe { &*CURRENT_DATE.0.get() };
+    dst.extend_from_slice(date.as_bytes());
 }
 
 struct Date {
