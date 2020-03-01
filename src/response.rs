@@ -1,6 +1,6 @@
 use std::io;
 
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 
 pub struct Response<'a> {
     headers: [&'static str; 16],
@@ -54,7 +54,7 @@ impl<'a> Response<'a> {
         match self.body {
             Body::DMsg => {}
             Body::SMsg(s) => {
-                self.rsp_buf.put_slice(s.as_bytes());
+                self.rsp_buf.extend_from_slice(s.as_bytes());
                 self.body = Body::DMsg;
             }
         }
@@ -84,29 +84,27 @@ impl<'a> Response<'a> {
 }
 
 pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
-    // additional 200 bytes for headers, this should never happended
-    buf.reserve(msg.body_len() + 200);
     if msg.status_message.msg == "Ok" {
-        buf.put_slice(b"HTTP/1.1 200 Ok\r\nServer: may\r\nDate: ");
+        buf.extend_from_slice(b"HTTP/1.1 200 Ok\r\nServer: may\r\nDate: ");
     } else {
-        buf.put_slice(b"HTTP/1.1 ");
-        buf.put_slice(msg.status_message.code.as_bytes());
-        buf.put_slice(b" ");
-        buf.put_slice(msg.status_message.msg.as_bytes());
-        buf.put_slice(b"\r\nServer: may\r\nDate: ");
+        buf.extend_from_slice(b"HTTP/1.1 ");
+        buf.extend_from_slice(msg.status_message.code.as_bytes());
+        buf.extend_from_slice(b" ");
+        buf.extend_from_slice(msg.status_message.msg.as_bytes());
+        buf.extend_from_slice(b"\r\nServer: may\r\nDate: ");
     }
     crate::date::set_date(buf);
-    buf.put_slice(b"\r\nContent-Length: ");
+    buf.extend_from_slice(b"\r\nContent-Length: ");
     itoa::fmt(&mut buf, msg.body_len()).unwrap();
 
     for i in 0..msg.headers_len {
         let h = *unsafe { msg.headers.get_unchecked(i) };
-        buf.put_slice(b"\r\n");
-        buf.put_slice(h.as_bytes());
+        buf.extend_from_slice(b"\r\n");
+        buf.extend_from_slice(h.as_bytes());
     }
 
-    buf.put_slice(b"\r\n\r\n");
-    buf.put_slice(msg.get_body());
+    buf.extend_from_slice(b"\r\n\r\n");
+    buf.extend_from_slice(msg.get_body());
     msg.clear_body();
 }
 
@@ -116,7 +114,7 @@ pub struct BodyWriter<'a>(pub &'a mut BytesMut);
 impl<'a> io::Write for BodyWriter<'a> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.put_slice(buf);
+        self.0.extend_from_slice(buf);
         Ok(buf.len())
     }
 
