@@ -1,7 +1,7 @@
 use std::io;
 
-use may_minihttp::{BodyWriter, HttpService, HttpServiceFactory, Request, Response};
-use serde::Serialize;
+use may_minihttp::{HttpService, HttpServiceFactory, Request, Response};
+use yarte::Serialize;
 
 #[derive(Serialize)]
 struct HeloMessage {
@@ -16,12 +16,10 @@ impl HttpService for Techempower {
         match req.path() {
             "/json" => {
                 rsp.header("Content-Type: application/json");
-                serde_json::to_writer(
-                    BodyWriter(rsp.body_mut()),
-                    &HeloMessage {
-                        message: "Hello, World!",
-                    },
-                )?;
+                HeloMessage {
+                    message: "Hello, World!",
+                }
+                .to_bytes_mut(rsp.body_mut());
             }
             "/plaintext" => {
                 rsp.header("Content-Type: text/plain").body("Hello, World!");

@@ -15,15 +15,17 @@ httparse = "1"
 lazy_static = "1"
 
 [dev-dependencies]
-markup = "0.12"
+mimalloc = "0.1"
 num_cpus = "1.0"
 oorandom = "11"
 smallvec = "1.1"
 env_logger = "0.8"
-v_htmlescape = "0.13"
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+yarte = { version = "0.15", features = ["bytes-buf", "json"] }
 may_postgres = { git = "https://github.com/Xudong-Huang/may_postgres.git" }
+
+[patch.crates-io]
+may = {git = "https://github.com/Xudong-Huang/may.git"}
 
 [profile.release]
 lto = true
