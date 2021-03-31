@@ -62,7 +62,7 @@ impl Date {
         write!(
             self,
             "{}",
-            time::OffsetDateTime::now().format("%a, %d %b %Y %H:%M:%S GMT")
+            time::OffsetDateTime::now_utc().format("%a, %d %b %Y %H:%M:%S GMT")
         )
         .unwrap();
         self.cnt.store(id, Ordering::Relaxed);

@@ -1,7 +1,6 @@
 use std::{fmt, io, slice, str};
 
 use bytes::BytesMut;
-use httparse;
 
 pub struct Request {
     method: Slice,
@@ -41,6 +40,10 @@ impl Request {
         }
     }
 
+    pub fn body(&self) -> &[u8] {
+        unimplemented!()
+    }
+
     fn slice(&self, slice: &Slice) -> &[u8] {
         &self.data[slice.0..slice.1]
     }
@@ -59,7 +62,6 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
 
     let status = match r.parse(buf) {
         Ok(s) => s,
-        #[cold]
         Err(e) => {
             let msg = format!("failed to parse http request: {:?}", e);
             return Err(io::Error::new(io::ErrorKind::Other, msg));

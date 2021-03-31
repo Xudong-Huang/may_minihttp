@@ -17,7 +17,6 @@ macro_rules! t {
     ($e: expr) => {
         match $e {
             Ok(val) => val,
-            #[cold]
             Err(err) => {
                 if err.kind() == io::ErrorKind::ConnectionReset
                     || err.kind() == io::ErrorKind::UnexpectedEof
@@ -37,7 +36,6 @@ macro_rules! t_c {
     ($e: expr) => {
         match $e {
             Ok(val) => val,
-            #[cold]
             Err(err) => {
                 error!("call = {:?}\nerr = {:?}", stringify!($e), err);
                 continue;
@@ -105,7 +103,8 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
                 req_buf.reserve(4096 * 8);
             }
 
-            let read_buf = unsafe { &mut *(req_buf.bytes_mut() as *mut _ as *mut [u8]) };
+            let buf = req_buf.chunk_mut();
+            let read_buf = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr(), buf.len()) };
             match stream.read(read_buf) {
                 Ok(n) => {
                     if n == 0 {
@@ -192,12 +191,12 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         }
 
         let n = {
-            let read_buf = unsafe { &mut *(req_buf.bytes_mut() as *mut _ as *mut [u8]) };
+            let buf = req_buf.chunk_mut();
+            let read_buf = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr(), buf.len()) };
             t!(stream.read(read_buf))
         };
         //connection was closed
         if n == 0 {
-            #[cold]
             return;
         }
         unsafe { req_buf.advance_mut(n) };
