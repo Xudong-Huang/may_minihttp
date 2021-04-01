@@ -6,7 +6,6 @@ This crate is ported from [tokio_minihttp](https://github.com/tokio-rs/tokio-min
 But with much ease of use, you can call `MAY` block APIs directly in your service.
 
 [![Build Status](https://travis-ci.org/Xudong-Huang/may_minihttp.svg?branch=master)](https://travis-ci.org/Xudong-Huang/may_minihttp)
-[![Build status](https://ci.appveyor.com/api/projects/status/igu446dc9w9luudw/branch/master?svg=true)](https://ci.appveyor.com/project/Xudong-Huang/may-minihttp/branch/master)
 
 ## Usage
 

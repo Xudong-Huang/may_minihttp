@@ -3,6 +3,7 @@ sudo: false
 
 os:
  - linux
+ - windows
 
 rust:
   - stable
