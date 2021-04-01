@@ -24,9 +24,6 @@ serde_json = "1"
 yarte = { version = "0.15", features = ["bytes-buf", "json"] }
 may_postgres = { git = "https://github.com/Xudong-Huang/may_postgres.git" }
 
-[patch.crates-io]
-may = {git = "https://github.com/Xudong-Huang/may.git"}
-
 [profile.release]
 lto = true
 opt-level = 3

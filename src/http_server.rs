@@ -99,8 +99,9 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         stream.reset_io();
         loop {
             // read the socket for reqs
-            if req_buf.capacity() - req_buf.len() < 512 {
-                req_buf.reserve(4096 * 8);
+            let remaining = req_buf.capacity() - req_buf.len();
+            if remaining < 512 {
+                req_buf.reserve(4096 * 8 - remaining);
             }
 
             let buf = req_buf.chunk_mut();
@@ -129,8 +130,9 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
             }
         }
 
-        if rsp_buf.capacity() - rsp_buf.len() <= 512 {
-            rsp_buf.reserve(4096 * 32);
+        let remaining = rsp_buf.capacity() - rsp_buf.len();
+        if remaining < 512 {
+            rsp_buf.reserve(4096 * 32 - remaining);
         }
 
         // prepare the reqs
@@ -186,8 +188,9 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
     let mut body_buf = BytesMut::with_capacity(4096 * 8);
     loop {
         // read the socket for reqs
-        if req_buf.capacity() - req_buf.len() < 512 {
-            req_buf.reserve(4096 * 8);
+        let remaining = req_buf.capacity() - req_buf.len();
+        if remaining < 512 {
+            req_buf.reserve(4096 * 8 - remaining);
         }
 
         let n = {

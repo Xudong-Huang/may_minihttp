@@ -291,6 +291,7 @@ fn main() {
     may::config()
         .set_pool_capacity(10000)
         .set_stack_size(0x1000);
+    println!("Starting http server: 127.0.0.1:8081");
     let server = HttpServer {
         db_pool: PgConnectionPool::new(
             "postgres://benchmarkdbuser:benchmarkdbpass@tfb-database/hello_world",
