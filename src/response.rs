@@ -12,6 +12,7 @@ pub struct Response<'a> {
 
 enum Body {
     SMsg(&'static str),
+    VMsg(Vec<u8>),
     DMsg,
 }
 
@@ -50,11 +51,19 @@ impl<'a> Response<'a> {
         self.body = Body::SMsg(s);
     }
 
+    pub fn body_vec(&mut self, v: Vec<u8>) {
+        self.body = Body::VMsg(v);
+    }
+
     pub fn body_mut(&mut self) -> &mut BytesMut {
         match self.body {
             Body::DMsg => {}
             Body::SMsg(s) => {
                 self.rsp_buf.extend_from_slice(s.as_bytes());
+                self.body = Body::DMsg;
+            }
+            Body::VMsg(ref v) => {
+                self.rsp_buf.extend_from_slice(v);
                 self.body = Body::DMsg;
             }
         }
@@ -65,6 +74,7 @@ impl<'a> Response<'a> {
         match self.body {
             Body::DMsg => self.rsp_buf.len(),
             Body::SMsg(s) => s.len(),
+            Body::VMsg(ref v) => v.len(),
         }
     }
 
@@ -72,6 +82,7 @@ impl<'a> Response<'a> {
         match self.body {
             Body::DMsg => self.rsp_buf.as_ref(),
             Body::SMsg(s) => s.as_bytes(),
+            Body::VMsg(ref v) => v,
         }
     }
 
@@ -79,6 +90,7 @@ impl<'a> Response<'a> {
         match self.body {
             Body::DMsg => self.rsp_buf.clear(),
             Body::SMsg(_) => {}
+            Body::VMsg(_) => {}
         }
     }
 }

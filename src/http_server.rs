@@ -139,9 +139,11 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         while let Some(req) = t!(request::decode(&mut req_buf)) {
             let mut rsp = Response::new(&mut body_buf);
             if let Err(e) = service.call(req, &mut rsp) {
-                rsp = internal_error_rsp(e, &mut body_buf);
+                let err_rsp = internal_error_rsp(e, &mut body_buf);
+                response::encode(err_rsp, &mut rsp_buf);
+            } else {
+                response::encode(rsp, &mut rsp_buf);
             }
-            response::encode(rsp, &mut rsp_buf);
         }
 
         if !rsp_buf.is_empty() {
@@ -208,9 +210,11 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         while let Some(req) = t!(request::decode(&mut req_buf)) {
             let mut rsp = Response::new(&mut body_buf);
             if let Err(e) = service.call(req, &mut rsp) {
-                rsp = internal_error_rsp(e, &mut body_buf);
+                let err_rsp = internal_error_rsp(e, &mut body_buf);
+                response::encode(err_rsp, &mut rsp_buf);
+            } else {
+                response::encode(rsp, &mut rsp_buf);
             }
-            response::encode(rsp, &mut rsp_buf);
         }
 
         // send the result back to client
