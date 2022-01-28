@@ -4,7 +4,7 @@ use may_minihttp::{HttpService, HttpServiceFactory, Request, Response};
 use yarte::Serialize;
 
 #[derive(Serialize)]
-struct HeloMessage {
+struct HelloMessage {
     message: &'static str,
 }
 
@@ -16,7 +16,7 @@ impl HttpService for Techempower {
         match req.path() {
             "/json" => {
                 rsp.header("Content-Type: application/json");
-                HeloMessage {
+                HelloMessage {
                     message: "Hello, World!",
                 }
                 .to_bytes_mut(rsp.body_mut());

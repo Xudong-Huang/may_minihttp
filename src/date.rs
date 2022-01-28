@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use bytes::BytesMut;
 use lazy_static::lazy_static;
+use time::format_description::FormatItem;
 
 // "Sun, 06 Nov 1994 08:49:37 GMT".len()
 const DATE_VALUE_LENGTH: usize = 29;
@@ -34,14 +35,20 @@ struct Date {
     bytes: [[u8; DATE_VALUE_LENGTH]; 2],
     pos: [usize; 2],
     cnt: AtomicUsize,
+    format: Vec<FormatItem<'static>>,
 }
 
 impl Date {
     fn new() -> Date {
+        let format = time::format_description::parse(
+            "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] GMT",
+        )
+        .unwrap();
         let mut date = Date {
             bytes: [[0; DATE_VALUE_LENGTH], [0; DATE_VALUE_LENGTH]],
             pos: [0; 2],
             cnt: AtomicUsize::new(0),
+            format,
         };
         date.update();
         date.cnt.store(1, Ordering::Relaxed);
@@ -62,7 +69,9 @@ impl Date {
         write!(
             self,
             "{}",
-            time::OffsetDateTime::now_utc().format("%a, %d %b %Y %H:%M:%S GMT")
+            time::OffsetDateTime::now_utc()
+                .format(&self.format)
+                .expect("failed format time")
         )
         .unwrap();
         self.cnt.store(id, Ordering::Relaxed);

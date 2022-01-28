@@ -1,6 +1,7 @@
-use std::{fmt, io, slice, str};
-
 use bytes::BytesMut;
+
+use std::mem::MaybeUninit;
+use std::{fmt, io, slice, str};
 
 pub struct Request {
     method: Slice,
@@ -56,8 +57,10 @@ impl fmt::Debug for Request {
 }
 
 pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
-    let mut headers: [httparse::Header; 16] =
-        unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+    let mut headers: [httparse::Header; 16] = unsafe {
+        let h: [MaybeUninit<httparse::Header>; 16] = MaybeUninit::uninit().assume_init();
+        std::mem::transmute(h)
+    };
     let mut r = httparse::Request::new(&mut headers);
 
     let status = match r.parse(buf) {
@@ -79,8 +82,10 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
         (start, start + a.len())
     };
 
-    let mut headers: [(Slice, Slice); 16] =
-        unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+    let mut headers: [(Slice, Slice); 16] = unsafe {
+        let h: [MaybeUninit<(Slice, Slice)>; 16] = MaybeUninit::uninit().assume_init();
+        std::mem::transmute(h)
+    };
     let mut headers_len = 0;
     for h in r.headers.iter() {
         debug_assert!(headers_len < 16);

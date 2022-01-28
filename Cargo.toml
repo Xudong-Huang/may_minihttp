@@ -8,18 +8,18 @@ license = "MIT/Apache-2.0"
 [dependencies]
 may = "0.3"
 log = "0.4"
-time = "0.2"
-itoa = "0.4"
+itoa = "1"
 bytes = "1"
 httparse = "1"
 lazy_static = "1"
+time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 mimalloc = "0.1"
 num_cpus = "1.0"
 oorandom = "11"
 smallvec = "1.1"
-env_logger = "0.8"
+env_logger = "0.9"
 serde_json = "1"
 yarte = { version = "0.15", features = ["bytes-buf", "json"] }
 may_postgres = { git = "https://github.com/Xudong-Huang/may_postgres.git" }

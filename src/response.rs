@@ -1,6 +1,7 @@
-use std::io;
-
 use bytes::BytesMut;
+
+use std::io;
+use std::mem::MaybeUninit;
 
 pub struct Response<'a> {
     headers: [&'static str; 16],
@@ -11,9 +12,9 @@ pub struct Response<'a> {
 }
 
 enum Body {
-    SMsg(&'static str),
-    VMsg(Vec<u8>),
-    DMsg,
+    Str(&'static str),
+    Vec(Vec<u8>),
+    Dummy,
 }
 
 struct StatusMessage {
@@ -23,10 +24,15 @@ struct StatusMessage {
 
 impl<'a> Response<'a> {
     pub(crate) fn new(rsp_buf: &'a mut BytesMut) -> Response {
+        let headers: [&'static str; 16] = unsafe {
+            let h: [MaybeUninit<&'static str>; 16] = MaybeUninit::uninit().assume_init();
+            std::mem::transmute(h)
+        };
+
         Response {
-            headers: unsafe { std::mem::MaybeUninit::uninit().assume_init() },
+            headers,
             headers_len: 0,
-            body: Body::DMsg,
+            body: Body::Dummy,
             status_message: StatusMessage {
                 code: "200",
                 msg: "Ok",
@@ -48,23 +54,23 @@ impl<'a> Response<'a> {
     }
 
     pub fn body(&mut self, s: &'static str) {
-        self.body = Body::SMsg(s);
+        self.body = Body::Str(s);
     }
 
     pub fn body_vec(&mut self, v: Vec<u8>) {
-        self.body = Body::VMsg(v);
+        self.body = Body::Vec(v);
     }
 
     pub fn body_mut(&mut self) -> &mut BytesMut {
         match self.body {
-            Body::DMsg => {}
-            Body::SMsg(s) => {
+            Body::Dummy => {}
+            Body::Str(s) => {
                 self.rsp_buf.extend_from_slice(s.as_bytes());
-                self.body = Body::DMsg;
+                self.body = Body::Dummy;
             }
-            Body::VMsg(ref v) => {
+            Body::Vec(ref v) => {
                 self.rsp_buf.extend_from_slice(v);
-                self.body = Body::DMsg;
+                self.body = Body::Dummy;
             }
         }
         self.rsp_buf
@@ -72,30 +78,30 @@ impl<'a> Response<'a> {
 
     fn body_len(&self) -> usize {
         match self.body {
-            Body::DMsg => self.rsp_buf.len(),
-            Body::SMsg(s) => s.len(),
-            Body::VMsg(ref v) => v.len(),
+            Body::Dummy => self.rsp_buf.len(),
+            Body::Str(s) => s.len(),
+            Body::Vec(ref v) => v.len(),
         }
     }
 
     fn get_body(&mut self) -> &[u8] {
         match self.body {
-            Body::DMsg => self.rsp_buf.as_ref(),
-            Body::SMsg(s) => s.as_bytes(),
-            Body::VMsg(ref v) => v,
+            Body::Dummy => self.rsp_buf.as_ref(),
+            Body::Str(s) => s.as_bytes(),
+            Body::Vec(ref v) => v,
         }
     }
 
     fn clear_body(&mut self) {
         match self.body {
-            Body::DMsg => self.rsp_buf.clear(),
-            Body::SMsg(_) => {}
-            Body::VMsg(_) => {}
+            Body::Dummy => self.rsp_buf.clear(),
+            Body::Str(_) => {}
+            Body::Vec(_) => {}
         }
     }
 }
 
-pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
+pub fn encode(mut msg: Response, buf: &mut BytesMut) {
     if msg.status_message.msg == "Ok" {
         buf.extend_from_slice(b"HTTP/1.1 200 Ok\r\nServer: may\r\nDate: ");
     } else {
@@ -107,7 +113,8 @@ pub fn encode(mut msg: Response, mut buf: &mut BytesMut) {
     }
     crate::date::set_date(buf);
     buf.extend_from_slice(b"\r\nContent-Length: ");
-    itoa::fmt(&mut buf, msg.body_len()).unwrap();
+    let mut length = itoa::Buffer::new();
+    buf.extend_from_slice(length.format(msg.body_len()).as_bytes());
 
     for i in 0..msg.headers_len {
         let h = *unsafe { msg.headers.get_unchecked(i) };

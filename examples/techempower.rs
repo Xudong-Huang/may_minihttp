@@ -34,7 +34,7 @@ mod utils {
 }
 
 #[derive(Serialize)]
-struct HeloMessage {
+struct HelloMessage {
     message: &'static str,
 }
 
@@ -232,7 +232,7 @@ impl HttpService for Techempower {
         match req.path() {
             "/json" => {
                 rsp.header("Content-Type: application/json");
-                let msg = HeloMessage {
+                let msg = HelloMessage {
                     message: "Hello, World!",
                 };
                 msg.to_bytes_mut(rsp.body_mut());
