@@ -10,6 +10,7 @@ pub struct Request {
     headers: [(Slice, Slice); 16],
     headers_len: usize,
     data: BytesMut,
+    body: BytesMut
 }
 
 type Slice = (usize, usize);
@@ -42,7 +43,7 @@ impl Request {
     }
 
     pub fn body(&self) -> &[u8] {
-        unimplemented!()
+        &self.body
     }
 
     fn slice(&self, slice: &Slice) -> &[u8] {
@@ -101,6 +102,7 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
         headers,
         headers_len,
         data: buf.split_to(amt),
+        body: buf.split_to(buf.len())
     }))
 }
 
