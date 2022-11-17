@@ -146,37 +146,35 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
             }
         }
 
-        if !rsp_buf.is_empty() {
-            let len = rsp_buf.len();
-            let mut written = 0;
-            while written < len {
-                match stream.write(&rsp_buf[written..]) {
-                    Ok(n) => {
-                        if n == 0 {
-                            return;
-                        } else {
-                            written += n;
-                        }
-                    }
-                    Err(err) => {
-                        if err.kind() == io::ErrorKind::WouldBlock {
-                            break;
-                        } else if err.kind() == io::ErrorKind::ConnectionReset
-                            || err.kind() == io::ErrorKind::UnexpectedEof
-                        {
-                            // info!("http server read req: connection closed");
-                            return;
-                        }
-                        error!("call = {:?}\nerr = {:?}", stringify!($e), err);
+        let len = rsp_buf.len();
+        let mut written = 0;
+        while written < len {
+            match stream.write(&rsp_buf[written..]) {
+                Ok(n) => {
+                    if n == 0 {
                         return;
+                    } else {
+                        written += n;
                     }
                 }
+                Err(err) => {
+                    if err.kind() == io::ErrorKind::WouldBlock {
+                        break;
+                    } else if err.kind() == io::ErrorKind::ConnectionReset
+                        || err.kind() == io::ErrorKind::UnexpectedEof
+                    {
+                        // info!("http server read req: connection closed");
+                        return;
+                    }
+                    error!("call = {:?}\nerr = {:?}", stringify!($e), err);
+                    return;
+                }
             }
-            if written == len {
-                unsafe { rsp_buf.set_len(0) }
-            } else if written > 0 {
-                rsp_buf.advance(written);
-            }
+        }
+        if written == len {
+            unsafe { rsp_buf.set_len(0) }
+        } else if written > 0 {
+            rsp_buf.advance(written);
         }
 
         stream.wait_io();
