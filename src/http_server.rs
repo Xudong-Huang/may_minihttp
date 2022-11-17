@@ -53,7 +53,7 @@ pub trait HttpService {
 
 pub trait HttpServiceFactory: Send + Sized + 'static {
     type Service: HttpService + Send;
-    // creat a new http service for each connection
+    // create a new http service for each connection
     fn new_service(&self) -> Self::Service;
 
     /// Spawns the http service, binding to the given address
@@ -98,7 +98,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
     loop {
         stream.reset_io();
         loop {
-            // read the socket for reqs
+            // read the socket for requests
             let remaining = req_buf.capacity() - req_buf.len();
             if remaining < 512 {
                 req_buf.reserve(4096 * 8 - remaining);
@@ -135,7 +135,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
             rsp_buf.reserve(4096 * 32 - remaining);
         }
 
-        // prepare the reqs
+        // prepare the requests
         while let Some(req) = t!(request::decode(&mut req_buf)) {
             let mut rsp = Response::new(&mut body_buf);
             if let Err(e) = service.call(req, &mut rsp) {
@@ -187,7 +187,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
     let mut rsp_buf = BytesMut::with_capacity(4096 * 32);
     let mut body_buf = BytesMut::with_capacity(4096 * 8);
     loop {
-        // read the socket for reqs
+        // read the socket for requests
         let remaining = req_buf.capacity() - req_buf.len();
         if remaining < 512 {
             req_buf.reserve(4096 * 8 - remaining);
@@ -204,7 +204,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         }
         unsafe { req_buf.advance_mut(n) };
 
-        // prepare the reqs
+        // prepare the requests
         while let Some(req) = t!(request::decode(&mut req_buf)) {
             let mut rsp = Response::new(&mut body_buf);
             if let Err(e) = service.call(req, &mut rsp) {
