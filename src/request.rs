@@ -49,6 +49,7 @@ impl<'req> Read for Body<'req> {
 }
 
 impl<'req> Body<'req> {
+    /// This is preferable over using `std::io::Read` if your `Body` is small.
     pub fn resolve(self) -> BytesMut {
         let mut req_buf = self.buf.into_inner();
         loop {
