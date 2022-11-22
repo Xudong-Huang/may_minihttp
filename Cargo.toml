@@ -10,9 +10,9 @@ may = "0.3"
 log = "0.4"
 itoa = "1"
 bytes = "1"
+httpdate = "1"
 httparse = "1"
 lazy_static = "1"
-time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 mimalloc = "0.1"
