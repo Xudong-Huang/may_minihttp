@@ -41,7 +41,7 @@ struct Date {
 impl Date {
     fn new() -> Date {
         let format = time::format_description::parse(
-            "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] GMT",
+            "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] UTC",
         )
         .unwrap();
         let mut date = Date {
