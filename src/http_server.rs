@@ -1,17 +1,18 @@
 //! http server implementation on top of `MAY`
 
 use std::io::{self, Read, Write};
+use std::mem::MaybeUninit;
 use std::net::ToSocketAddrs;
 
 use crate::request::{self, Request};
 use crate::response::{self, Response};
-#[cfg(unix)]
 use bytes::Buf;
 use bytes::{BufMut, BytesMut};
 #[cfg(unix)]
 use may::io::WaitIo;
 use may::net::{TcpListener, TcpStream};
 use may::{coroutine, go};
+use memchr::memmem::FinderRev;
 
 macro_rules! t {
     ($e: expr) => {
@@ -89,18 +90,15 @@ fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
 ///
 pub struct HttpServer<T>(pub T);
 
-#[cfg(unix)]
+// #[cfg(unix)]
 fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
-    use std::mem::MaybeUninit;
-
-    use memchr::memmem::FinderRev;
-
     let mut req_buf = BytesMut::with_capacity(4096 * 8);
     let mut rsp_buf = BytesMut::with_capacity(4096 * 32);
     let mut body_buf = BytesMut::with_capacity(4096 * 8);
     stream.set_nonblocking(true).unwrap();
     let finder = FinderRev::new(b"\r\n\r\n");
     loop {
+        #[cfg(unix)]
         stream.reset_io();
 
         loop {
@@ -195,10 +193,12 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
             rsp_buf.advance(written);
         }
 
+        #[cfg(unix)]
         stream.wait_io();
     }
 }
 
+/*
 #[cfg(not(unix))]
 fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
     let mut req_buf = BytesMut::with_capacity(4096 * 8);
@@ -222,8 +222,13 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         }
         unsafe { req_buf.advance_mut(n) };
 
+        let mut headers: [httparse::Header; 16] = unsafe {
+            let h: [MaybeUninit<httparse::Header>; 16] = MaybeUninit::uninit().assume_init();
+            std::mem::transmute(h)
+        };
+
         // prepare the requests
-        while let Some(req) = t!(request::decode(&mut req_buf)) {
+        while let Some(req) = t!(request::decode(&req_buf, &mut headers, &mut stream)) {
             let mut rsp = Response::new(&mut body_buf);
             if let Err(e) = service.call(req, &mut rsp) {
                 let err_rsp = internal_error_rsp(e, &mut body_buf);
@@ -238,6 +243,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         rsp_buf.clear();
     }
 }
+*/
 
 impl<T: HttpService + Clone + Send + Sync + 'static> HttpServer<T> {
     /// Spawns the http service, binding to the given address
