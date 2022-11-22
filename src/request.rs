@@ -103,9 +103,6 @@ pub fn decode<'headers, 'req, 'stream>(
     headers: &'headers mut [httparse::Header<'req>; 16],
     stream: &'stream mut TcpStream,
 ) -> io::Result<Option<Request<'headers, 'req, 'stream>>> {
-    unsafe {
-        println!("{:?}", std::str::from_utf8_unchecked(&buf));
-    }
     let mut r = httparse::Request::new(headers);
 
     let status = match r.parse(buf) {
