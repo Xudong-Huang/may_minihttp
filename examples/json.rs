@@ -5,7 +5,7 @@ use std::io;
 struct HelloJson;
 
 impl HttpService for HelloJson {
-    fn call(&mut self, _req: Request, rsp: &mut Response) -> io::Result<()> {
+    fn call(&mut self, req: Request, rsp: &mut Response) -> io::Result<()> {
         rsp.header("Content-Type: application/json");
         let w = BodyWriter(rsp.body_mut());
         serde_json::to_writer(w, &serde_json::json!({"message": "Hello, World!"}))?;

@@ -91,12 +91,16 @@ pub struct HttpServer<T>(pub T);
 
 #[cfg(unix)]
 fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
+    use memchr::memmem::FinderRev;
+
     let mut req_buf = BytesMut::with_capacity(4096 * 8);
     let mut rsp_buf = BytesMut::with_capacity(4096 * 32);
     let mut body_buf = BytesMut::with_capacity(4096 * 8);
     stream.set_nonblocking(true).unwrap();
+    let finder = FinderRev::new(b"\r\n\r\n");
     loop {
         stream.reset_io();
+
         loop {
             // read the socket for requests
             let remaining = req_buf.capacity() - req_buf.len();
@@ -113,11 +117,16 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
                         return;
                     } else {
                         unsafe { req_buf.advance_mut(n) };
+
+                        if finder.rfind(&req_buf).is_some() {
+                            break;
+                        }
                     }
                 }
                 Err(err) => {
                     if err.kind() == io::ErrorKind::WouldBlock {
-                        break;
+                        // error!("Unexpected EOF");
+                        return;
                     } else if err.kind() == io::ErrorKind::ConnectionReset
                         || err.kind() == io::ErrorKind::UnexpectedEof
                     {
@@ -136,7 +145,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         }
 
         // prepare the requests
-        while let Some(req) = t!(request::decode(&mut req_buf)) {
+        while let Some(req) = t!(request::decode(&mut req_buf, &mut stream)) {
             let mut rsp = Response::new(&mut body_buf);
             if let Err(e) = service.call(req, &mut rsp) {
                 let err_rsp = internal_error_rsp(e, &mut body_buf);
