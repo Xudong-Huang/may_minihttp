@@ -91,6 +91,8 @@ pub struct HttpServer<T>(pub T);
 
 #[cfg(unix)]
 fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
+    use std::mem::MaybeUninit;
+
     use memchr::memmem::FinderRev;
 
     let mut req_buf = BytesMut::with_capacity(4096 * 8);
@@ -144,8 +146,13 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
             rsp_buf.reserve(4096 * 32 - remaining);
         }
 
+        let mut headers: [httparse::Header; 16] = unsafe {
+            let h: [MaybeUninit<httparse::Header>; 16] = MaybeUninit::uninit().assume_init();
+            std::mem::transmute(h)
+        };
+
         // prepare the requests
-        while let Some(req) = t!(request::decode(&mut req_buf, &mut stream)) {
+        while let Some(req) = t!(request::decode(&req_buf, &mut headers, &mut stream)) {
             let mut rsp = Response::new(&mut body_buf);
             if let Err(e) = service.call(req, &mut rsp) {
                 let err_rsp = internal_error_rsp(e, &mut body_buf);

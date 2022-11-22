@@ -1,31 +1,24 @@
-use bytes::buf::Reader;
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{BufMut, BytesMut};
 use may::net::TcpStream;
 
 use std::io::Read;
-use std::mem::MaybeUninit;
-use std::{fmt, io, slice, str};
+use std::{fmt, io};
 
-pub struct Request<'req> {
-    method: Slice,
-    path: Slice,
-    version: u8,
-    headers: [(Slice, Slice); 16],
-    headers_len: usize,
-    data: BytesMut,
-    pub body: Body<'req>,
+pub struct Request<'headers, 'req, 'stream> {
+    pub parameters: httparse::Request<'headers, 'req>,
+    data: &'req [u8],
+    pub body: Body<'req, 'stream>,
 }
 
-pub struct Body<'req> {
-    buf: Reader<BytesMut>,
-    buf_len: usize,
-    stream: &'req mut TcpStream,
+pub struct Body<'req, 'stream> {
+    buf: &'req [u8],
+    stream: &'stream mut TcpStream,
     wrote_body: usize,
 }
 
-impl<'req> Read for Body<'req> {
+impl<'req, 'stream> Read for Body<'req, 'stream> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.wrote_body == self.buf_len {
+        if self.wrote_body == self.buf.len() {
             match self.stream.read(buf) {
                 Ok(n) => Ok(n),
                 Err(err) => {
@@ -48,10 +41,11 @@ impl<'req> Read for Body<'req> {
     }
 }
 
-impl<'req> Body<'req> {
+impl<'req, 'stream> Body<'req, 'stream> {
     /// This is preferable over using `std::io::Read` if your `Body` is small.
     pub fn resolve(self) -> BytesMut {
-        let mut req_buf = self.buf.into_inner();
+        let mut req_buf = BytesMut::with_capacity(4096 * 8);
+        req_buf.extend_from_slice(self.buf);
         loop {
             // read the socket for requests
             let remaining = req_buf.capacity() - req_buf.len();
@@ -88,55 +82,31 @@ impl<'req> Body<'req> {
     }
 }
 
-type Slice = (usize, usize);
-
-pub struct RequestHeaders<'req> {
-    headers: slice::Iter<'req, (Slice, Slice)>,
-    req: &'req Request<'req>,
-}
-
-impl<'req> Request<'req> {
-    pub fn method(&self) -> &str {
-        // str::from_utf8(self.slice(&self.method)).unwrap()
-        unsafe { str::from_utf8_unchecked(self.slice(&self.method)) }
-    }
-
-    pub fn path(&self) -> &str {
-        // str::from_utf8(self.slice(&self.path)).unwrap()
-        unsafe { str::from_utf8_unchecked(self.slice(&self.path)) }
-    }
-
-    pub fn version(&self) -> u8 {
-        self.version
-    }
-
-    pub fn headers(&self) -> RequestHeaders {
-        RequestHeaders {
-            headers: self.headers[..self.headers_len].iter(),
-            req: self,
-        }
-    }
-
-    fn slice(&self, slice: &Slice) -> &[u8] {
-        &self.data[slice.0..slice.1]
+impl<'headers, 'req, 'stream> Request<'headers, 'req, 'stream> {
+    pub fn headers(&self) -> &[httparse::Header] {
+        &*self.parameters.headers
     }
 }
 
-impl<'req> fmt::Debug for Request<'req> {
+impl<'headers, 'req, 'stream> fmt::Debug for Request<'headers, 'req, 'stream> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "<HTTP Request {} {}>", self.method(), self.path())
+        write!(
+            f,
+            "<HTTP Request {:?} {:?}>",
+            self.parameters.method, self.parameters.path
+        )
     }
 }
 
-pub fn decode<'req>(
-    buf: &mut BytesMut,
-    stream: &'req mut TcpStream,
-) -> io::Result<Option<Request<'req>>> {
-    let mut headers: [httparse::Header; 16] = unsafe {
-        let h: [MaybeUninit<httparse::Header>; 16] = MaybeUninit::uninit().assume_init();
-        std::mem::transmute(h)
-    };
-    let mut r = httparse::Request::new(&mut headers);
+pub fn decode<'headers, 'req, 'stream>(
+    buf: &'req BytesMut,
+    headers: &'headers mut [httparse::Header<'req>; 16],
+    stream: &'stream mut TcpStream,
+) -> io::Result<Option<Request<'headers, 'req, 'stream>>> {
+    unsafe {
+        println!("{:?}", std::str::from_utf8_unchecked(&buf));
+    }
+    let mut r = httparse::Request::new(headers);
 
     let status = match r.parse(buf) {
         Ok(s) => s,
@@ -151,52 +121,15 @@ pub fn decode<'req>(
         httparse::Status::Partial => return Ok(None),
     };
 
-    let toslice = |a: &[u8]| {
-        let start = a.as_ptr() as usize - buf.as_ptr() as usize;
-        debug_assert!(start < buf.len());
-        (start, start + a.len())
-    };
-
-    let mut headers: [(Slice, Slice); 16] = unsafe {
-        let h: [MaybeUninit<(Slice, Slice)>; 16] = MaybeUninit::uninit().assume_init();
-        std::mem::transmute(h)
-    };
-    let mut headers_len = 0;
-    for h in r.headers.iter() {
-        debug_assert!(headers_len < 16);
-        *unsafe { headers.get_unchecked_mut(headers_len) } =
-            (toslice(h.name.as_bytes()), toslice(h.value));
-        headers_len += 1;
-    }
-
     Ok(Some(Request {
-        method: toslice(r.method.unwrap().as_bytes()),
-        path: toslice(r.path.unwrap().as_bytes()),
-        version: r.version.unwrap(),
-        headers,
-        headers_len,
-        data: buf.split_to(amt),
+        parameters: r,
+        data: &buf[0..amt],
         body: {
-            let sp = buf.split_to(buf.len());
-
             Body {
-                buf_len: sp.len(),
-                buf: sp.reader(),
+                buf: &buf[amt..],
                 stream,
                 wrote_body: 0,
             }
         },
     }))
-}
-
-impl<'req> Iterator for RequestHeaders<'req> {
-    type Item = (&'req str, &'req [u8]);
-
-    fn next(&mut self) -> Option<(&'req str, &'req [u8])> {
-        self.headers.next().map(|&(ref a, ref b)| {
-            let a = self.req.slice(a);
-            let b = self.req.slice(b);
-            (unsafe { str::from_utf8_unchecked(a) }, b)
-        })
-    }
 }
