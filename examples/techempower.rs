@@ -197,8 +197,9 @@ impl PgConnection {
         Ok(worlds)
     }
 
-    fn tell_fortune(&self) -> Result<SmallVec<[Fortune; 32]>, may_postgres::Error> {
-        let mut items: SmallVec<[_; 32]> = smallvec::smallvec![Fortune {
+    fn tell_fortune(&self) -> Result<Vec<Fortune>, may_postgres::Error> {
+        // we can't use SmallVec here according to the rules of the benchmark
+        let mut items = vec![Fortune {
             id: 0,
             message: Cow::Borrowed("Additional fortune added at request time."),
         }];
