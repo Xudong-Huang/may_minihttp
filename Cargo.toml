@@ -15,15 +15,16 @@ httparse = "1"
 lazy_static = "1"
 
 [dev-dependencies]
+atoi = "2"
 mimalloc = "0.1"
 num_cpus = "1.0"
-oorandom = "11"
 smallvec = "1.1"
 env_logger = "0.10"
 serde_json = "1"
 buf-min = { version = "0.7", features = ["bytes"] }
 yarte = { version = "0.15", features = ["bytes-buf", "json"] }
 may_postgres = { git = "https://github.com/Xudong-Huang/may_postgres.git" }
+nanorand = { version = "0.7", default-features = false, features = ["std", "wyrand"] }
 
 [profile.release]
 opt-level = 3

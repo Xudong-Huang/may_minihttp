@@ -9,16 +9,17 @@ use std::sync::Arc;
 
 use may_minihttp::{HttpService, HttpServiceFactory, Request, Response};
 use may_postgres::{self, types::ToSql, Client, Statement};
-use oorandom::Rand32;
+use nanorand::{Rng, WyRand};
 use smallvec::SmallVec;
 use yarte::{ywrite_html, Serialize};
 
 mod utils {
+    use atoi::FromRadix10;
     use may_postgres::types::ToSql;
 
     pub fn get_query_param(query: &str) -> u16 {
         let q = if let Some(pos) = query.find("?q") {
-            query.split_at(pos + 3).1.parse::<u16>().ok().unwrap_or(1)
+            u16::from_radix_10(query.split_at(pos + 3).1.as_ref()).0
         } else {
             1
         };
@@ -127,18 +128,18 @@ impl PgConnection {
                 id: row.get(0),
                 randomnumber: row.get(1),
             }),
-            None => unreachable!(),
+            None => unreachable!("random_id={}", random_id),
         }
     }
 
     fn get_worlds(
         &self,
         num: usize,
-        rand: &mut Rand32,
+        rand: &mut WyRand,
     ) -> Result<SmallVec<[WorldRow; 32]>, may_postgres::Error> {
         let mut queries = SmallVec::<[_; 32]>::new();
         for _ in 0..num {
-            let random_id = rand.rand_range(1..10001) as i32;
+            let random_id = rand.generate::<u32>() % 10_000 + 1;
             queries.push(
                 self.client
                     .query_raw(&self.world, utils::slice_iter(&[&random_id]))?,
@@ -161,11 +162,11 @@ impl PgConnection {
     fn updates(
         &self,
         num: usize,
-        rand: &mut Rand32,
+        rand: &mut WyRand,
     ) -> Result<SmallVec<[WorldRow; 32]>, may_postgres::Error> {
         let mut queries = SmallVec::<[_; 32]>::new();
         for _ in 0..num {
-            let random_id = (rand.rand_u32() % 10_000 + 1) as i32;
+            let random_id = (rand.generate::<u32>() % 10_000 + 1) as i32;
             queries.push(
                 self.client
                     .query_raw(&self.world, utils::slice_iter(&[&random_id]))?,
@@ -174,7 +175,7 @@ impl PgConnection {
 
         let mut worlds = SmallVec::<[_; 32]>::new();
         for mut q in queries {
-            let new_random_num = (rand.rand_u32() % 10_000 + 1) as i32;
+            let new_random_num = (rand.generate::<u32>() % 10_000 + 1) as i32;
             match q.next().transpose()? {
                 Some(row) => worlds.push(WorldRow {
                     id: row.get(0),
@@ -223,7 +224,7 @@ impl PgConnection {
 
 struct Techempower {
     db: Arc<PgConnection>,
-    rng: Rand32,
+    rng: WyRand,
 }
 
 impl HttpService for Techempower {
@@ -242,7 +243,7 @@ impl HttpService for Techempower {
             }
             "/db" => {
                 rsp.header("Content-Type: application/json");
-                let random_id = self.rng.rand_range(1..10001) as i32;
+                let random_id = (self.rng.generate::<u32>() % 10_000 + 1) as i32;
                 let world = self.db.get_world(random_id).unwrap();
                 world.to_bytes_mut(rsp.body_mut())
             }
@@ -282,8 +283,8 @@ impl HttpServiceFactory for HttpServer {
     type Service = Techempower;
 
     fn new_service(&self) -> Self::Service {
-        let (db, idx) = self.db_pool.get_connection();
-        let rng = Rand32::new(idx as u64);
+        let (db, _idx) = self.db_pool.get_connection();
+        let rng = WyRand::new();
         Techempower { db, rng }
     }
 }
