@@ -139,7 +139,7 @@ impl PgConnection {
     ) -> Result<SmallVec<[WorldRow; 32]>, may_postgres::Error> {
         let mut queries = SmallVec::<[_; 32]>::new();
         for _ in 0..num {
-            let random_id = rand.generate::<u32>() % 10_000 + 1;
+            let random_id = (rand.generate::<u32>() % 10_000 + 1) as i32;
             queries.push(
                 self.client
                     .query_raw(&self.world, utils::slice_iter(&[&random_id]))?,
