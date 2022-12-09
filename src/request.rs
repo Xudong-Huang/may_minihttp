@@ -1,10 +1,9 @@
 use bytes::BytesMut;
 
-use std::mem::MaybeUninit;
 use std::{fmt, io, slice, str};
 
 pub struct Request {
-    method: Slice,
+    method: &'static str,
     path: Slice,
     version: u8,
     headers: [(Slice, Slice); 16],
@@ -21,8 +20,7 @@ pub struct RequestHeaders<'req> {
 
 impl Request {
     pub fn method(&self) -> &str {
-        // str::from_utf8(self.slice(&self.method)).unwrap()
-        unsafe { str::from_utf8_unchecked(self.slice(&self.method)) }
+        self.method
     }
 
     pub fn path(&self) -> &str {
@@ -57,10 +55,7 @@ impl fmt::Debug for Request {
 }
 
 pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
-    let mut headers: [httparse::Header; 16] = unsafe {
-        let h: [MaybeUninit<httparse::Header>; 16] = MaybeUninit::uninit().assume_init();
-        std::mem::transmute(h)
-    };
+    let mut headers = [httparse::EMPTY_HEADER; 16];
     let mut r = httparse::Request::new(&mut headers);
 
     let status = match r.parse(buf) {
@@ -82,10 +77,7 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
         (start, start + a.len())
     };
 
-    let mut headers: [(Slice, Slice); 16] = unsafe {
-        let h: [MaybeUninit<(Slice, Slice)>; 16] = MaybeUninit::uninit().assume_init();
-        std::mem::transmute(h)
-    };
+    let mut headers: [(Slice, Slice); 16] = [((0, 0), (0, 0)); 16];
     let mut headers_len = 0;
     for h in r.headers.iter() {
         debug_assert!(headers_len < 16);
@@ -95,7 +87,7 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
     }
 
     Ok(Some(Request {
-        method: toslice(r.method.unwrap().as_bytes()),
+        method: unsafe { std::mem::transmute(r.method.unwrap()) }, // this is static
         path: toslice(r.path.unwrap().as_bytes()),
         version: r.version.unwrap(),
         headers,

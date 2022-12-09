@@ -87,7 +87,7 @@ fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
 #[allow(dead_code)]
 #[inline]
 fn reserve_buf(buf: &mut BytesMut, len: usize) {
-    let remaining = buf.capacity() - buf.len();
+    let remaining = buf.capacity();
     if remaining < 1024 {
         buf.reserve(len - remaining);
     }
@@ -95,14 +95,15 @@ fn reserve_buf(buf: &mut BytesMut, len: usize) {
 
 #[cfg(unix)]
 #[inline]
-fn nonblock_read(stream: &mut TcpStream, req_buf: &mut BytesMut) -> io::Result<()> {
-    // reserve_buf(&mut req_buf, 4096 * 32);
+fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
+    reserve_buf(req_buf, 4096 * 32);
+    let mut read_cnt = 0;
     loop {
-        let buf = req_buf.chunk_mut();
-        let read_buf = unsafe { &mut *(buf as *mut _ as *mut [u8]) };
+        let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
         match stream.read(read_buf) {
             Ok(n) => {
                 if n > 0 {
+                    read_cnt += n;
                     unsafe { req_buf.advance_mut(n) };
                 } else {
                     //connection was closed
@@ -118,12 +119,12 @@ fn nonblock_read(stream: &mut TcpStream, req_buf: &mut BytesMut) -> io::Result<(
             }
         }
     }
-    Ok(())
+    Ok(read_cnt)
 }
 
 #[cfg(unix)]
 #[inline]
-fn nonblock_write(stream: &mut TcpStream, write_buf: &mut BytesMut) -> io::Result<()> {
+fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Result<usize> {
     let len = write_buf.len();
     let mut written = 0;
     while written < len {
@@ -143,13 +144,10 @@ fn nonblock_write(stream: &mut TcpStream, write_buf: &mut BytesMut) -> io::Resul
             }
         }
     }
-    if written == len {
-        unsafe { write_buf.set_len(0) }
-    } else if written > 0 {
-        write_buf.advance(written);
-    }
 
-    Ok(())
+    write_buf.advance(written);
+
+    Ok(written)
 }
 
 /// this is the generic type http server
@@ -161,35 +159,39 @@ pub struct HttpServer<T>(pub T);
 fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
     let mut req_buf = BytesMut::with_capacity(4096 * 32);
     let mut rsp_buf = BytesMut::with_capacity(4096 * 32);
-    let mut body_buf = BytesMut::with_capacity(4096 * 32);
-    stream.set_nonblocking(true).unwrap();
+    let mut body_buf = BytesMut::with_capacity(4096 * 8);
+
     loop {
         stream.reset_io();
 
+        let inner_stream = stream.inner_mut();
+
         // read the socket for requests
-        if let Err(e) = nonblock_read(&mut stream, &mut req_buf) {
-            return error!("write err = {:?}", e);
-        }
+        let read_cnt = match nonblock_read(inner_stream, &mut req_buf) {
+            Ok(n) => n,
+            Err(e) => return error!("read err = {:?}", e),
+        };
 
         // prepare the requests
-        // reserve_buf(&mut rsp_buf, 4096 * 32);
-        while let Some(req) = t!(request::decode(&mut req_buf)) {
-            let mut rsp = Response::new(&mut body_buf);
-            match service.call(req, &mut rsp) {
-                Ok(()) => response::encode(rsp, &mut rsp_buf),
-                Err(e) => {
-                    let err_rsp = internal_error_rsp(e, &mut body_buf);
-                    response::encode(err_rsp, &mut rsp_buf);
+        reserve_buf(&mut rsp_buf, 4096 * 32);
+        if read_cnt > 0 {
+            while let Some(req) = t!(request::decode(&mut req_buf)) {
+                let mut rsp = Response::new(&mut body_buf);
+                match service.call(req, &mut rsp) {
+                    Ok(()) => response::encode(rsp, &mut rsp_buf),
+                    Err(e) => {
+                        let err_rsp = internal_error_rsp(e, &mut body_buf);
+                        response::encode(err_rsp, &mut rsp_buf);
+                    }
                 }
             }
         }
 
         // write out the responses
-        if let Err(e) = nonblock_write(&mut stream, &mut rsp_buf) {
-            return error!("write err = {:?}", e);
+        match nonblock_write(inner_stream, &mut rsp_buf) {
+            Ok(_) => stream.wait_io(),
+            Err(e) => return error!("write err = {:?}", e),
         }
-
-        stream.wait_io();
     }
 }
 

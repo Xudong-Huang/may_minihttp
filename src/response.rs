@@ -1,7 +1,6 @@
 use bytes::BytesMut;
 
 use std::io;
-use std::mem::MaybeUninit;
 
 pub struct Response<'a> {
     headers: [&'static str; 16],
@@ -24,10 +23,7 @@ struct StatusMessage {
 
 impl<'a> Response<'a> {
     pub(crate) fn new(rsp_buf: &'a mut BytesMut) -> Response {
-        let headers: [&'static str; 16] = unsafe {
-            let h: [MaybeUninit<&'static str>; 16] = MaybeUninit::uninit().assume_init();
-            std::mem::transmute(h)
-        };
+        let headers: [&'static str; 16] = [""; 16];
 
         Response {
             headers,
@@ -103,13 +99,13 @@ impl<'a> Response<'a> {
 
 pub fn encode(mut msg: Response, buf: &mut BytesMut) {
     if msg.status_message.msg == "Ok" {
-        buf.extend_from_slice(b"HTTP/1.1 200 Ok\r\nServer: may\r\nDate: ");
+        buf.extend_from_slice(b"HTTP/1.1 200 Ok\r\nServer: M\r\nDate: ");
     } else {
         buf.extend_from_slice(b"HTTP/1.1 ");
         buf.extend_from_slice(msg.status_message.code.as_bytes());
         buf.extend_from_slice(b" ");
         buf.extend_from_slice(msg.status_message.msg.as_bytes());
-        buf.extend_from_slice(b"\r\nServer: may\r\nDate: ");
+        buf.extend_from_slice(b"\r\nServer: M\r\nDate: ");
     }
     crate::date::set_date(buf);
     buf.extend_from_slice(b"\r\nContent-Length: ");
