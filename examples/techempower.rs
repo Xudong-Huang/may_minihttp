@@ -215,7 +215,7 @@ impl PgConnection {
             id: 0,
             message: "Additional fortune added at request time.",
         });
-        fortunes.sort_by(|it, next| it.message.cmp(&next.message));
+        fortunes.sort_by(|it, next| it.message.cmp(next.message));
 
         let mut body = std::mem::replace(buf, BytesMut::new());
         ywrite_html!(body, "{{> fortune }}");
