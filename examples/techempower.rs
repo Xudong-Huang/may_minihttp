@@ -1,12 +1,12 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use std::borrow::Cow;
 use std::fmt::Write;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use bytes::BytesMut;
 use may_minihttp::{HttpService, HttpServiceFactory, Request, Response};
 use may_postgres::{self, types::ToSql, Client, Statement};
 use nanorand::{Rng, WyRand};
@@ -45,9 +45,9 @@ struct WorldRow {
 }
 
 #[derive(Serialize)]
-pub struct Fortune {
+pub struct Fortune<'a> {
     id: i32,
-    message: Cow<'static, str>,
+    message: &'a str,
 }
 
 struct PgConnectionPool {
@@ -198,27 +198,29 @@ impl PgConnection {
         Ok(worlds)
     }
 
-    fn tell_fortune(&self) -> Result<Vec<Fortune>, may_postgres::Error> {
-        // we can't use SmallVec here according to the rules of the benchmark
-        let mut items = vec![Fortune {
-            id: 0,
-            message: Cow::Borrowed("Additional fortune added at request time."),
-        }];
-
+    fn tell_fortune(&self, buf: &mut BytesMut) -> Result<(), may_postgres::Error> {
         let rows = self
             .client
             .query_raw(&self.fortune, utils::slice_iter(&[]))?;
 
-        for row in rows {
-            let r = row?;
-            items.push(Fortune {
+        let all_rows = rows.map(|r| r.unwrap()).collect::<Vec<_>>();
+        let mut fortunes = all_rows
+            .iter()
+            .map(|r| Fortune {
                 id: r.get(0),
-                message: Cow::Owned(r.get(1)),
-            });
-        }
+                message: r.get(1),
+            })
+            .collect::<Vec<_>>();
+        fortunes.push(Fortune {
+            id: 0,
+            message: "Additional fortune added at request time.",
+        });
+        fortunes.sort_by(|it, next| it.message.cmp(&next.message));
 
-        items.sort_by(|it, next| it.message.cmp(&next.message));
-        Ok(items)
+        let mut body = std::mem::replace(buf, BytesMut::new());
+        ywrite_html!(body, "{{> fortune }}");
+        let _ = std::mem::replace(buf, body);
+        Ok(())
     }
 }
 
@@ -249,10 +251,7 @@ impl HttpService for Techempower {
             }
             "/fortunes" => {
                 rsp.header("Content-Type: text/html; charset=utf-8");
-                let fortunes = self.db.tell_fortune().unwrap();
-                let mut body = Vec::with_capacity(2048);
-                ywrite_html!(body, "{{> fortune }}");
-                rsp.body_vec(body);
+                self.db.tell_fortune(rsp.body_mut()).unwrap();
             }
             p if p.starts_with("/queries") => {
                 rsp.header("Content-Type: application/json");
