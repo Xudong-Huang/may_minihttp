@@ -3,6 +3,7 @@
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
 
+use crate::buf_pool::{reserve_buf, BUF_POOL};
 use crate::request::{self, Request};
 use crate::response::{self, Response};
 #[cfg(unix)]
@@ -84,19 +85,10 @@ fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
     err_rsp
 }
 
-#[allow(dead_code)]
-#[inline]
-fn reserve_buf(buf: &mut BytesMut, len: usize) {
-    let remaining = buf.capacity();
-    if remaining < 1024 {
-        buf.reserve(len - remaining);
-    }
-}
-
 #[cfg(unix)]
 #[inline]
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
-    reserve_buf(req_buf, 4096 * 32);
+    reserve_buf(req_buf);
     let mut read_cnt = 0;
     loop {
         let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
@@ -157,9 +149,9 @@ pub struct HttpServer<T>(pub T);
 
 #[cfg(unix)]
 fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
-    let mut req_buf = BytesMut::with_capacity(4096 * 32);
-    let mut rsp_buf = BytesMut::with_capacity(4096 * 32);
-    let mut body_buf = BytesMut::with_capacity(4096 * 8);
+    let mut req_buf = BUF_POOL.get();
+    let mut rsp_buf = BUF_POOL.get();
+    let mut body_buf = BUF_POOL.get();
 
     loop {
         stream.reset_io();
@@ -173,7 +165,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         };
 
         // prepare the requests
-        reserve_buf(&mut rsp_buf, 4096 * 32);
+        reserve_buf(&mut rsp_buf);
         if read_cnt > 0 {
             while let Some(req) = t!(request::decode(&mut req_buf)) {
                 let mut rsp = Response::new(&mut body_buf);
@@ -197,12 +189,12 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
 
 #[cfg(not(unix))]
 fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
-    let mut req_buf = BytesMut::with_capacity(4096 * 32);
-    let mut rsp_buf = BytesMut::with_capacity(4096 * 32);
-    let mut body_buf = BytesMut::with_capacity(4096 * 32);
+    let mut req_buf = BUF_POOL.get();
+    let mut rsp_buf = BUF_POOL.get();
+    let mut body_buf = BUF_POOL.get();
     loop {
         // read the socket for requests
-        reserve_buf(&mut req_buf, 4096 * 32);
+        reserve_buf(&mut req_buf);
 
         let n = {
             let buf = req_buf.chunk_mut();

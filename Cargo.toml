@@ -13,6 +13,8 @@ itoa = "1"
 bytes = "1"
 httpdate = "1"
 httparse = "1"
+crossbeam = "0.8"
+once_cell = "1"
 lazy_static = "1"
 
 [dev-dependencies]
