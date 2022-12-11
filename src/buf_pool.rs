@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use crossbeam::queue::SegQueue;
+use may::sync::Mutex;
 use once_cell::sync::Lazy;
 
 use std::ops::{Deref, DerefMut};
@@ -37,25 +37,27 @@ impl Drop for BytesBuf {
 
 pub struct BufBool {
     // the pool must support mpmc operation!
-    pool: SegQueue<BytesBuf>,
+    pool: Mutex<Vec<BytesBuf>>,
 }
 
 impl BufBool {
     pub fn new() -> Self {
         let capacity = MAX_BUFS;
-        let pool = SegQueue::new();
+        let mut pool = Vec::new();
         for _ in 0..capacity {
             let buf = BytesMut::with_capacity(BUF_LEN).into();
             pool.push(buf);
         }
 
-        BufBool { pool }
+        BufBool {
+            pool: Mutex::new(pool),
+        }
     }
 
     /// get a raw coroutine from the pool
     #[inline]
     pub fn get(&self) -> BytesBuf {
-        match self.pool.pop() {
+        match self.pool.lock().unwrap().pop() {
             Some(buf) => buf,
             None => BytesMut::with_capacity(BUF_LEN).into(),
         }
@@ -64,11 +66,12 @@ impl BufBool {
     /// put a raw coroutine into the pool
     #[inline]
     pub fn put(&self, buf: BytesBuf) {
+        let mut pool = self.pool.lock().unwrap();
         // discard the co if push failed
-        if self.pool.len() >= MAX_BUFS {
+        if pool.len() >= MAX_BUFS {
             return;
         }
-        self.pool.push(buf);
+        pool.push(buf);
     }
 }
 
