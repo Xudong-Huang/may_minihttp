@@ -3,22 +3,20 @@ use std::fmt::{self, Write};
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
 // "Sun, 06 Nov 1994 08:49:37 GMT".len()
 const DATE_VALUE_LENGTH: usize = 29;
 
-lazy_static! {
-    static ref CURRENT_DATE: Arc<DataWrap> = {
-        let date = Arc::new(DataWrap(UnsafeCell::new(Date::new())));
-        let date_clone = date.clone();
-        may::go!(move || loop {
-            may::coroutine::sleep(std::time::Duration::from_millis(500));
-            unsafe { &mut *(date_clone.0).get() }.update();
-        });
-        date
-    };
-}
+static CURRENT_DATE: Lazy<Arc<DataWrap>> = Lazy::new(|| {
+    let date = Arc::new(DataWrap(UnsafeCell::new(Date::new())));
+    let date_clone = date.clone();
+    may::go!(move || loop {
+        may::coroutine::sleep(std::time::Duration::from_millis(500));
+        unsafe { &mut *(date_clone.0).get() }.update();
+    });
+    date
+});
 
 struct DataWrap(UnsafeCell<Date>);
 unsafe impl Sync for DataWrap {}
