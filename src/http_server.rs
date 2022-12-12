@@ -161,7 +161,10 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         // read the socket for requests
         let read_cnt = match nonblock_read(inner_stream, &mut req_buf) {
             Ok(n) => n,
-            Err(e) => return error!("read err = {:?}", e),
+            Err(e) => {
+                error!("read err = {:?}", e);
+                break;
+            }
         };
 
         // prepare the requests
@@ -182,9 +185,13 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         // write out the responses
         match nonblock_write(inner_stream, &mut rsp_buf) {
             Ok(_) => stream.wait_io(),
-            Err(e) => return error!("write err = {:?}", e),
+            Err(e) => {
+                error!("write err = {:?}", e);
+                break;
+            }
         }
     }
+    stream.shutdown(std::net::Shutdown::Both).ok();
 }
 
 #[cfg(not(unix))]
