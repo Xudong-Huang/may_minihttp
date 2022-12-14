@@ -14,25 +14,6 @@ use may::io::WaitIo;
 use may::net::{TcpListener, TcpStream};
 use may::{coroutine, go};
 
-macro_rules! t {
-    ($e: expr) => {
-        match $e {
-            Ok(val) => val,
-            Err(err) => {
-                if err.kind() == io::ErrorKind::ConnectionReset
-                    || err.kind() == io::ErrorKind::UnexpectedEof
-                {
-                    // info!("http server read req: connection closed");
-                    return;
-                }
-
-                error!("call = {:?}\nerr = {:?}", stringify!($e), err);
-                return;
-            }
-        }
-    };
-}
-
 macro_rules! t_c {
     ($e: expr) => {
         match $e {
@@ -68,7 +49,11 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
                     let stream = t_c!(stream);
                     t_c!(stream.set_nodelay(true));
                     let service = self.new_service();
-                    go!(move || each_connection_loop(stream, service));
+                    go!(
+                        move || if let Err(e) = each_connection_loop(stream, service) {
+                            error!("service err = {:?}", e);
+                        }
+                    );
                 }
             }
         )
@@ -89,30 +74,20 @@ fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
 #[cfg(unix)]
 #[inline]
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
-    reserve_buf(req_buf);
     let mut read_cnt = 0;
     loop {
         let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
+        assert!(!read_buf.is_empty());
         match stream.read(read_buf) {
-            Ok(n) => {
-                if n > 0 {
-                    read_cnt += n;
-                    unsafe { req_buf.advance_mut(n) };
-                } else {
-                    //connection was closed
-                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
-                }
+            Ok(n) if n > 0 => {
+                read_cnt += n;
+                unsafe { req_buf.advance_mut(n) };
             }
-            Err(err) => {
-                if err.kind() == io::ErrorKind::WouldBlock {
-                    break;
-                }
-                // info!("http server read req: connection closed");
-                return Err(err);
-            }
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(read_cnt),
+            Ok(_) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
+            Err(err) => return Err(err),
         }
     }
-    Ok(read_cnt)
 }
 
 #[cfg(unix)]
@@ -122,24 +97,13 @@ fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Resu
     let mut written = 0;
     while written < len {
         match stream.write(&write_buf[written..]) {
-            Ok(n) => {
-                if n > 0 {
-                    written += n;
-                } else {
-                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
-                }
-            }
-            Err(err) => {
-                if err.kind() == io::ErrorKind::WouldBlock {
-                    break;
-                }
-                return Err(err);
-            }
+            Ok(n) if n > 0 => written += n,
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+            Err(err) => return Err(err),
+            Ok(_) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
         }
     }
-
     write_buf.advance(written);
-
     Ok(written)
 }
 
@@ -149,7 +113,7 @@ fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Resu
 pub struct HttpServer<T>(pub T);
 
 #[cfg(unix)]
-fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
+fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -> io::Result<()> {
     let mut req_buf = BUF_POOL.get();
     let mut rsp_buf = BUF_POOL.get();
     let mut body_buf = BUF_POOL.get();
@@ -160,18 +124,13 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         let inner_stream = stream.inner_mut();
 
         // read the socket for requests
-        let read_cnt = match nonblock_read(inner_stream, &mut req_buf) {
-            Ok(n) => n,
-            Err(e) => {
-                error!("read err = {:?}", e);
-                break;
-            }
-        };
+        reserve_buf(&mut req_buf);
+        let read_cnt = nonblock_read(inner_stream, &mut req_buf)?;
 
         // prepare the requests
         reserve_buf(&mut rsp_buf);
         if read_cnt > 0 {
-            while let Some(req) = t!(request::decode(&mut req_buf)) {
+            while let Some(req) = request::decode(&mut req_buf)? {
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
@@ -184,51 +143,44 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
         }
 
         // write out the responses
-        match nonblock_write(inner_stream, &mut rsp_buf) {
-            Ok(_) => stream.wait_io(),
-            Err(e) => {
-                error!("write err = {:?}", e);
-                break;
-            }
-        }
+        nonblock_write(inner_stream, &mut rsp_buf)?;
+        stream.wait_io();
     }
-    stream.shutdown(std::net::Shutdown::Both).ok();
+    // stream.shutdown(std::net::Shutdown::Both).ok();
 }
 
 #[cfg(not(unix))]
-fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) {
+fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -> io::Result<()> {
     let mut req_buf = BUF_POOL.get();
     let mut rsp_buf = BUF_POOL.get();
     let mut body_buf = BUF_POOL.get();
     loop {
         // read the socket for requests
         reserve_buf(&mut req_buf);
-
-        let n = {
-            let buf = req_buf.chunk_mut();
-            let read_buf = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr(), buf.len()) };
-            t!(stream.read(read_buf))
-        };
-        //connection was closed
-        if n == 0 {
-            return;
+        let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
+        let read_cnt = stream.read(read_buf)?;
+        if read_cnt == 0 {
+            //connection was closed
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
         }
-        unsafe { req_buf.advance_mut(n) };
+        unsafe { req_buf.advance_mut(read_cnt) };
 
         // prepare the requests
-        while let Some(req) = t!(request::decode(&mut req_buf)) {
-            let mut rsp = Response::new(&mut body_buf);
-            if let Err(e) = service.call(req, &mut rsp) {
-                let err_rsp = internal_error_rsp(e, &mut body_buf);
-                response::encode(err_rsp, &mut rsp_buf);
-            } else {
-                response::encode(rsp, &mut rsp_buf);
+        reserve_buf(&mut rsp_buf);
+        if read_cnt > 0 {
+            while let Some(req) = request::decode(&mut req_buf)? {
+                let mut rsp = Response::new(&mut body_buf);
+                if let Err(e) = service.call(req, &mut rsp) {
+                    let err_rsp = internal_error_rsp(e, &mut body_buf);
+                    response::encode(err_rsp, &mut rsp_buf);
+                } else {
+                    response::encode(rsp, &mut rsp_buf);
+                }
             }
         }
 
         // send the result back to client
-        t!(stream.write_all(rsp_buf.as_ref()));
-        rsp_buf.clear();
+        stream.write_all(rsp_buf.as_ref())?;
     }
 }
 
@@ -245,7 +197,11 @@ impl<T: HttpService + Clone + Send + Sync + 'static> HttpServer<T> {
                     let stream = t_c!(stream);
                     t_c!(stream.set_nodelay(true));
                     let service = service.clone();
-                    go!(move || each_connection_loop(stream, service));
+                    go!(
+                        move || if let Err(e) = each_connection_loop(stream, service) {
+                            error!("service err = {:?}", e);
+                        }
+                    );
                 }
             }
         )
