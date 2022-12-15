@@ -128,8 +128,8 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -
         let read_cnt = nonblock_read(inner_stream, &mut req_buf)?;
 
         // prepare the requests
-        reserve_buf(&mut rsp_buf);
         if read_cnt > 0 {
+            reserve_buf(&mut rsp_buf);
             while let Some(req) = request::decode(&mut req_buf)? {
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
@@ -166,8 +166,8 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -
         unsafe { req_buf.advance_mut(read_cnt) };
 
         // prepare the requests
-        reserve_buf(&mut rsp_buf);
         if read_cnt > 0 {
+            reserve_buf(&mut rsp_buf);
             while let Some(req) = request::decode(&mut req_buf)? {
                 let mut rsp = Response::new(&mut body_buf);
                 if let Err(e) = service.call(req, &mut rsp) {
