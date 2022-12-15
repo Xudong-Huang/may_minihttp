@@ -43,8 +43,7 @@ impl<'a> Response<'a> {
     }
 
     pub fn header(&mut self, header: &'static str) -> &mut Self {
-        debug_assert!(self.headers_len < 16);
-        *unsafe { self.headers.get_unchecked_mut(self.headers_len) } = header;
+        self.headers[self.headers_len] = header;
         self.headers_len += 1;
         self
     }
