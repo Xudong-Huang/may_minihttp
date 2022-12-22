@@ -203,14 +203,12 @@ impl PgConnection {
             .client
             .query_raw(&self.fortune, utils::slice_iter(&[]))?;
 
-        let all_rows = rows.map(|r| r.unwrap()).collect::<Vec<_>>();
-        let mut fortunes = all_rows
-            .iter()
-            .map(|r| Fortune {
-                id: r.get(0),
-                message: r.get(1),
-            })
-            .collect::<Vec<_>>();
+        let all_rows = Vec::from_iter(rows.map(|r| r.unwrap()));
+        let mut fortunes = Vec::with_capacity(all_rows.capacity() + 1);
+        fortunes.extend(all_rows.iter().map(|r| Fortune {
+            id: r.get(0),
+            message: r.get(1),
+        }));
         fortunes.push(Fortune {
             id: 0,
             message: "Additional fortune added at request time.",
@@ -289,9 +287,7 @@ impl HttpServiceFactory for HttpServer {
 }
 
 fn main() {
-    may::config()
-        .set_pool_capacity(10000)
-        .set_stack_size(0x1000);
+    may::config().set_pool_capacity(1000).set_stack_size(0x1000);
     println!("Starting http server: 127.0.0.1:8081");
     let server = HttpServer {
         db_pool: PgConnectionPool::new(

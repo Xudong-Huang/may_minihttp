@@ -46,12 +46,13 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
             coroutine::Builder::new().name("TcpServerFac".to_owned()),
             move || {
                 for stream in listener.incoming() {
-                    let stream = t_c!(stream);
+                    let mut stream = t_c!(stream);
                     t_c!(stream.set_nodelay(true));
                     let service = self.new_service();
                     go!(
-                        move || if let Err(e) = each_connection_loop(stream, service) {
+                        move || if let Err(e) = each_connection_loop(&mut stream, service) {
                             error!("service err = {:?}", e);
+                            stream.shutdown(std::net::Shutdown::Both).ok();
                         }
                     );
                 }
@@ -113,7 +114,7 @@ fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Resu
 pub struct HttpServer<T>(pub T);
 
 #[cfg(unix)]
-fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -> io::Result<()> {
+fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) -> io::Result<()> {
     let mut req_buf = BUF_POOL.get();
     let mut rsp_buf = BUF_POOL.get();
     let mut body_buf = BUF_POOL.get();
@@ -194,12 +195,13 @@ impl<T: HttpService + Clone + Send + Sync + 'static> HttpServer<T> {
             coroutine::Builder::new().name("TcpServer".to_owned()),
             move || {
                 for stream in listener.incoming() {
-                    let stream = t_c!(stream);
+                    let mut stream = t_c!(stream);
                     t_c!(stream.set_nodelay(true));
                     let service = service.clone();
                     go!(
-                        move || if let Err(e) = each_connection_loop(stream, service) {
+                        move || if let Err(e) = each_connection_loop(&mut stream, service) {
                             error!("service err = {:?}", e);
+                            stream.shutdown(std::net::Shutdown::Both).ok();
                         }
                     );
                 }

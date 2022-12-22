@@ -44,9 +44,7 @@ impl HttpServiceFactory for HttpServer {
 }
 
 fn main() {
-    may::config()
-        .set_pool_capacity(10000)
-        .set_stack_size(0x1000);
+    may::config().set_pool_capacity(500).set_stack_size(0x1000);
     let http_server = HttpServer {};
     let server = http_server.start("0.0.0.0:8081").unwrap();
     server.join().unwrap();
