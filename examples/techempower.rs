@@ -52,7 +52,7 @@ pub struct Fortune<'a> {
 
 struct PgConnectionPool {
     idx: AtomicUsize,
-    clients: Vec<Arc<PgConnection>>,
+    clients: Vec<PgConnection>,
 }
 
 impl PgConnectionPool {
@@ -60,7 +60,7 @@ impl PgConnectionPool {
         let mut clients = Vec::with_capacity(size);
         for _ in 0..size {
             let client = PgConnection::new(db_url);
-            clients.push(Arc::new(client));
+            clients.push(client);
         }
 
         PgConnectionPool {
@@ -69,18 +69,26 @@ impl PgConnectionPool {
         }
     }
 
-    fn get_connection(&self) -> (Arc<PgConnection>, usize) {
+    fn get_connection(&self) -> PgClient {
         let idx = self.idx.fetch_add(1, Ordering::Relaxed);
         let len = self.clients.len();
-        (self.clients[idx % len].clone(), idx)
+        let connection = &self.clients[idx % len];
+        PgClient {
+            client: connection.client.clone(),
+            statement: connection.statement.clone(),
+        }
     }
+}
+
+struct PgStatement {
+    world: Statement,
+    fortune: Statement,
+    updates: Vec<Statement>,
 }
 
 struct PgConnection {
     client: Client,
-    world: Statement,
-    fortune: Statement,
-    updates: Vec<Statement>,
+    statement: Arc<PgStatement>,
 }
 
 impl PgConnection {
@@ -111,18 +119,26 @@ impl PgConnection {
             updates.push(client.prepare(&q).unwrap());
         }
 
-        PgConnection {
-            client,
+        let statement = Arc::new(PgStatement {
             world,
             fortune,
             updates,
-        }
-    }
+        });
 
+        PgConnection { client, statement }
+    }
+}
+
+struct PgClient {
+    client: Client,
+    statement: Arc<PgStatement>,
+}
+
+impl PgClient {
     fn get_world(&self, random_id: i32) -> Result<WorldRow, may_postgres::Error> {
         let mut q = self
             .client
-            .query_raw(&self.world, utils::slice_iter(&[&random_id]))?;
+            .query_raw(&self.statement.world, utils::slice_iter(&[&random_id]))?;
         match q.next().transpose()? {
             Some(row) => Ok(WorldRow {
                 id: row.get(0),
@@ -142,7 +158,7 @@ impl PgConnection {
             let random_id = (rand.generate::<u32>() % 10_000 + 1) as i32;
             queries.push(
                 self.client
-                    .query_raw(&self.world, utils::slice_iter(&[&random_id]))?,
+                    .query_raw(&self.statement.world, utils::slice_iter(&[&random_id]))?,
             );
         }
 
@@ -169,7 +185,7 @@ impl PgConnection {
             let random_id = (rand.generate::<u32>() % 10_000 + 1) as i32;
             queries.push(
                 self.client
-                    .query_raw(&self.world, utils::slice_iter(&[&random_id]))?,
+                    .query_raw(&self.statement.world, utils::slice_iter(&[&random_id]))?,
             );
         }
 
@@ -194,14 +210,15 @@ impl PgConnection {
             params.push(&w.id);
         }
 
-        self.client.query(&self.updates[num - 1], &params)?;
+        self.client
+            .query(&self.statement.updates[num - 1], &params)?;
         Ok(worlds)
     }
 
     fn tell_fortune(&self, buf: &mut BytesMut) -> Result<(), may_postgres::Error> {
         let rows = self
             .client
-            .query_raw(&self.fortune, utils::slice_iter(&[]))?;
+            .query_raw(&self.statement.fortune, utils::slice_iter(&[]))?;
 
         let all_rows = Vec::from_iter(rows.map(|r| r.unwrap()));
         let mut fortunes = Vec::with_capacity(all_rows.capacity() + 1);
@@ -223,7 +240,7 @@ impl PgConnection {
 }
 
 struct Techempower {
-    db: Arc<PgConnection>,
+    db: PgClient,
     rng: WyRand,
 }
 
@@ -280,7 +297,7 @@ impl HttpServiceFactory for HttpServer {
     type Service = Techempower;
 
     fn new_service(&self) -> Self::Service {
-        let (db, _idx) = self.db_pool.get_connection();
+        let db = self.db_pool.get_connection();
         let rng = WyRand::new();
         Techempower { db, rng }
     }
