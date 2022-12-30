@@ -69,11 +69,11 @@ impl PgConnectionPool {
         }
     }
 
-    fn get_connection(&self) -> PgClient {
+    fn get_connection(&self) -> PgConnection {
         let idx = self.idx.fetch_add(1, Ordering::Relaxed);
         let len = self.clients.len();
         let connection = &self.clients[idx % len];
-        PgClient {
+        PgConnection {
             client: connection.client.clone(),
             statement: connection.statement.clone(),
         }
@@ -127,14 +127,7 @@ impl PgConnection {
 
         PgConnection { client, statement }
     }
-}
 
-struct PgClient {
-    client: Client,
-    statement: Arc<PgStatement>,
-}
-
-impl PgClient {
     fn get_world(&self, random_id: i32) -> Result<WorldRow, may_postgres::Error> {
         let mut q = self
             .client
@@ -240,7 +233,7 @@ impl PgClient {
 }
 
 struct Techempower {
-    db: PgClient,
+    db: PgConnection,
     rng: WyRand,
 }
 
