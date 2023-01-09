@@ -48,7 +48,7 @@ impl Date {
     fn update(&mut self) {
         let t = std::time::SystemTime::now();
         let date = httpdate::HttpDate::from(t);
-        write!(self, "{}", date).unwrap();
+        write!(self, "{date}").unwrap();
     }
 }
 

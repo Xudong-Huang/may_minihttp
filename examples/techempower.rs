@@ -56,12 +56,11 @@ struct PgConnectionPool {
 }
 
 impl PgConnectionPool {
-    fn new(db_url: &str, size: usize) -> PgConnectionPool {
-        let mut clients = Vec::with_capacity(size);
-        for _ in 0..size {
-            let client = PgConnection::new(db_url);
-            clients.push(client);
-        }
+    fn new(db_url: &'static str, size: usize) -> PgConnectionPool {
+        let clients = (0..size)
+            .map(|_| std::thread::spawn(move || PgConnection::new(db_url)))
+            .collect::<Vec<_>>();
+        let clients = clients.into_iter().map(|t| t.join().unwrap()).collect();
 
         PgConnectionPool {
             idx: AtomicUsize::new(0),
@@ -111,7 +110,7 @@ impl PgConnection {
             }
             q.push_str("ELSE randomnumber END WHERE id IN (");
             for _ in 1..=num {
-                let _ = write!(&mut q, "${},", pl);
+                let _ = write!(&mut q, "${pl},");
                 pl += 1;
             }
             q.pop();

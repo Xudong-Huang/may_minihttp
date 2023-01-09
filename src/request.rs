@@ -49,7 +49,7 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
     let status = match req.parse_with_uninit_headers(buf, &mut headers) {
         Ok(s) => s,
         Err(e) => {
-            let msg = format!("failed to parse http request: {:?}", e);
+            let msg = format!("failed to parse http request: {e:?}");
             return Err(io::Error::new(io::ErrorKind::Other, msg));
         }
     };
