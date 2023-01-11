@@ -15,7 +15,6 @@ use yarte::{ywrite_html, Serialize};
 
 mod utils {
     use atoi::FromRadix10;
-    use may_postgres::types::ToSql;
 
     pub fn get_query_param(query: &str) -> u16 {
         let q = if let Some(pos) = query.find("?q") {
@@ -24,12 +23,6 @@ mod utils {
             1
         };
         q.clamp(1, 500)
-    }
-
-    pub fn slice_iter<'a>(
-        s: &'a [&'a (dyn ToSql + Sync)],
-    ) -> impl ExactSizeIterator<Item = &'a dyn ToSql> + 'a {
-        s.iter().map(|s| *s as _)
     }
 }
 
@@ -130,7 +123,7 @@ impl PgConnection {
     fn get_world(&self, random_id: i32) -> Result<WorldRow, may_postgres::Error> {
         let mut q = self
             .client
-            .query_raw(&self.statement.world, utils::slice_iter(&[&random_id]))?;
+            .query_raw(&self.statement.world, [&random_id as _])?;
         match q.next().transpose()? {
             Some(row) => Ok(WorldRow {
                 id: row.get(0),
@@ -150,7 +143,7 @@ impl PgConnection {
             let random_id = (rand.generate::<u32>() % 10_000 + 1) as i32;
             queries.push(
                 self.client
-                    .query_raw(&self.statement.world, utils::slice_iter(&[&random_id]))?,
+                    .query_raw(&self.statement.world, [&random_id as _])?,
             );
         }
 
@@ -177,7 +170,7 @@ impl PgConnection {
             let random_id = (rand.generate::<u32>() % 10_000 + 1) as i32;
             queries.push(
                 self.client
-                    .query_raw(&self.statement.world, utils::slice_iter(&[&random_id]))?,
+                    .query_raw(&self.statement.world, [&random_id as _])?,
             );
         }
 
@@ -193,7 +186,7 @@ impl PgConnection {
             }
         }
 
-        let mut params: Vec<&(dyn ToSql + Sync)> = Vec::with_capacity(num * 3);
+        let mut params: Vec<&(dyn ToSql)> = Vec::with_capacity(num * 3);
         for w in &worlds {
             params.push(&w.id);
             params.push(&w.randomnumber);
@@ -203,14 +196,12 @@ impl PgConnection {
         }
 
         self.client
-            .query(&self.statement.updates[num - 1], &params)?;
+            .query_raw(&self.statement.updates[num - 1], params)?;
         Ok(worlds)
     }
 
     fn tell_fortune(&self, buf: &mut BytesMut) -> Result<(), may_postgres::Error> {
-        let rows = self
-            .client
-            .query_raw(&self.statement.fortune, utils::slice_iter(&[]))?;
+        let rows = self.client.query_raw(&self.statement.fortune, [])?;
 
         let all_rows = Vec::from_iter(rows.map(|r| r.unwrap()));
         let mut fortunes = Vec::with_capacity(all_rows.capacity() + 1);
