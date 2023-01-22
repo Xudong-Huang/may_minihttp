@@ -47,7 +47,7 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
             move || {
                 for stream in listener.incoming() {
                     let mut stream = t_c!(stream);
-                    t_c!(stream.set_nodelay(true));
+                    // t_c!(stream.set_nodelay(true));
                     let service = self.new_service();
                     go!(
                         move || if let Err(e) = each_connection_loop(&mut stream, service) {
@@ -196,7 +196,7 @@ impl<T: HttpService + Clone + Send + Sync + 'static> HttpServer<T> {
             move || {
                 for stream in listener.incoming() {
                     let mut stream = t_c!(stream);
-                    t_c!(stream.set_nodelay(true));
+                    // t_c!(stream.set_nodelay(true));
                     let service = service.clone();
                     go!(
                         move || if let Err(e) = each_connection_loop(&mut stream, service) {
