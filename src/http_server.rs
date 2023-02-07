@@ -3,7 +3,6 @@
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
 
-use crate::buf_pool::{reserve_buf, BUF_POOL};
 use crate::request::{self, Request};
 use crate::response::{self, Response};
 #[cfg(unix)]
@@ -108,6 +107,15 @@ fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Resu
     Ok(written)
 }
 
+const BUF_LEN: usize = 4096 * 8;
+#[inline]
+fn reserve_buf(buf: &mut BytesMut) {
+    let capacity = buf.capacity();
+    if capacity < 1024 {
+        buf.reserve(BUF_LEN - capacity);
+    }
+}
+
 /// this is the generic type http server
 /// with a type parameter that impl `HttpService` trait
 ///
@@ -115,9 +123,9 @@ pub struct HttpServer<T>(pub T);
 
 #[cfg(unix)]
 fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) -> io::Result<()> {
-    let mut req_buf = BUF_POOL.get();
-    let mut rsp_buf = BUF_POOL.get();
-    let mut body_buf = BUF_POOL.get();
+    let mut req_buf = BytesMut::with_capacity(BUF_LEN);
+    let mut rsp_buf = BytesMut::with_capacity(BUF_LEN);
+    let mut body_buf = BytesMut::with_capacity(BUF_LEN);
 
     loop {
         stream.reset_io();
@@ -152,9 +160,9 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
 #[cfg(not(unix))]
 fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -> io::Result<()> {
-    let mut req_buf = BUF_POOL.get();
-    let mut rsp_buf = BUF_POOL.get();
-    let mut body_buf = BUF_POOL.get();
+    let mut req_buf = BytesMut::with_capacity(BUF_LEN);
+    let mut rsp_buf = BytesMut::with_capacity(BUF_LEN);
+    let mut body_buf = BytesMut::with_capacity(BUF_LEN);
     loop {
         // read the socket for requests
         reserve_buf(&mut req_buf);

@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate log;
 
-mod buf_pool;
 mod date;
 mod http_server;
 mod request;
