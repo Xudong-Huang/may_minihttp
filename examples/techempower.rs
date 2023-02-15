@@ -51,22 +51,14 @@ impl PgConnectionPool {
         let clients = (0..size)
             .map(|_| std::thread::spawn(move || PgConnection::new(db_url)))
             .collect::<Vec<_>>();
-        let clients = clients.into_iter().map(|t| t.join().unwrap()).collect();
-
+        let mut clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
+        clients.sort_by(|a, b| (a.client.id() % size).cmp(&(b.client.id() % size)));
         PgConnectionPool { clients }
     }
 
     fn get_connection(&self, id: usize) -> PgConnection {
         let len = self.clients.len();
-        let thread_id = id % len;
-        let mut idx = 0;
-        for (i, client) in self.clients.iter().enumerate() {
-            if thread_id == (client.client.id() % len) {
-                idx = i;
-                break;
-            }
-        }
-        let connection = &self.clients[idx];
+        let connection = &self.clients[id % len];
         PgConnection {
             client: connection.client.clone(),
             statement: connection.statement.clone(),
