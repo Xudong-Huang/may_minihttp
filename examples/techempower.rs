@@ -188,7 +188,7 @@ impl PgConnection {
             }
         }
 
-        let mut params: Vec<&(dyn ToSql)> = Vec::with_capacity(num * 3);
+        let mut params: Vec<&(dyn ToSql + Sync)> = Vec::with_capacity(num * 3);
         for w in &worlds {
             params.push(&w.id);
             params.push(&w.randomnumber);
@@ -197,8 +197,10 @@ impl PgConnection {
             params.push(&w.id);
         }
 
-        self.client
-            .query_raw(&self.statement.updates[num - 1], params)?;
+        // use `query_one` to sync wait result
+        let _ = self
+            .client
+            .query_one(&self.statement.updates[num - 1], &params);
         Ok(worlds)
     }
 
