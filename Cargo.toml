@@ -32,7 +32,7 @@ nanorand = { version = "0.7", default-features = false, features = ["std", "wyra
 opt-level = 3
 codegen-units = 1
 panic = 'abort'
-lto = "thin"
+lto = 'thin'
 debug = false
 incremental = false
 overflow-checks = false

@@ -19,7 +19,7 @@ struct HelloWorldFac;
 impl HttpServiceFactory for HelloWorldFac {
     type Service = HelloWorld;
 
-    fn new_service(&self) -> Self::Service {
+    fn new_service(&self, _: usize) -> Self::Service {
         HelloWorld
     }
 }

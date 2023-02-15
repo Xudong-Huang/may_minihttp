@@ -3,7 +3,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::fmt::Write;
 use std::io;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -44,7 +43,6 @@ pub struct Fortune<'a> {
 }
 
 struct PgConnectionPool {
-    idx: AtomicUsize,
     clients: Vec<PgConnection>,
 }
 
@@ -55,16 +53,20 @@ impl PgConnectionPool {
             .collect::<Vec<_>>();
         let clients = clients.into_iter().map(|t| t.join().unwrap()).collect();
 
-        PgConnectionPool {
-            idx: AtomicUsize::new(0),
-            clients,
-        }
+        PgConnectionPool { clients }
     }
 
-    fn get_connection(&self) -> PgConnection {
-        let idx = self.idx.fetch_add(1, Ordering::Relaxed);
+    fn get_connection(&self, id: usize) -> PgConnection {
         let len = self.clients.len();
-        let connection = &self.clients[idx % len];
+        let thread_id = id % len;
+        let mut idx = 0;
+        for (i, client) in self.clients.iter().enumerate() {
+            if thread_id == (client.client.id() % len) {
+                idx = i;
+                break;
+            }
+        }
+        let connection = &self.clients[idx];
         PgConnection {
             client: connection.client.clone(),
             statement: connection.statement.clone(),
@@ -279,8 +281,8 @@ struct HttpServer {
 impl HttpServiceFactory for HttpServer {
     type Service = Techempower;
 
-    fn new_service(&self) -> Self::Service {
-        let db = self.db_pool.get_connection();
+    fn new_service(&self, id: usize) -> Self::Service {
+        let db = self.db_pool.get_connection(id);
         let rng = WyRand::new();
         Techempower { db, rng }
     }

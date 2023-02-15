@@ -35,7 +35,7 @@ pub trait HttpService {
 pub trait HttpServiceFactory: Send + Sized + 'static {
     type Service: HttpService + Send;
     // create a new http service for each connection
-    fn new_service(&self) -> Self::Service;
+    fn new_service(&self, id: usize) -> Self::Service;
 
     /// Spawns the http service, binding to the given address
     /// return a coroutine that you can cancel it when need to stop the service
@@ -44,10 +44,12 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
         go!(
             coroutine::Builder::new().name("TcpServerFac".to_owned()),
             move || {
+                use std::os::fd::AsRawFd;
                 for stream in listener.incoming() {
                     let mut stream = t_c!(stream);
+                    let id = stream.as_raw_fd() as usize;
                     // t_c!(stream.set_nodelay(true));
-                    let service = self.new_service();
+                    let service = self.new_service(id);
                     go!(
                         move || if let Err(e) = each_connection_loop(&mut stream, service) {
                             error!("service err = {:?}", e);

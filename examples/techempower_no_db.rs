@@ -38,7 +38,7 @@ struct HttpServer {}
 impl HttpServiceFactory for HttpServer {
     type Service = Techempower;
 
-    fn new_service(&self) -> Self::Service {
+    fn new_service(&self,  _: usize) -> Self::Service {
         Techempower {}
     }
 }
