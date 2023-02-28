@@ -151,6 +151,9 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                     }
                 }
             }
+
+            // we still need to reuse the body buf
+            reserve_buf(&mut body_buf);
         }
 
         // write out the responses
@@ -188,6 +191,9 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -
                     response::encode(rsp, &mut rsp_buf);
                 }
             }
+
+            // we still need to reuse the body buf
+            reserve_buf(&mut body_buf);
         }
 
         // send the result back to client
