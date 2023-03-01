@@ -50,12 +50,15 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
                     let id = stream.as_raw_fd() as usize;
                     // t_c!(stream.set_nodelay(true));
                     let service = self.new_service(id);
+                    let builder = may::coroutine::Builder::new().id(id);
                     go!(
+                        builder,
                         move || if let Err(e) = each_connection_loop(&mut stream, service) {
                             error!("service err = {:?}", e);
                             stream.shutdown(std::net::Shutdown::Both).ok();
                         }
-                    );
+                    )
+                    .unwrap();
                 }
             }
         )
