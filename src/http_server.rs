@@ -99,10 +99,10 @@ fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Resu
     let mut written = 0;
     while written < len {
         match stream.write(&write_buf[written..]) {
-            Ok(n) if n > 0 => written += n,
+            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
+            Ok(n) => written += n,
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
             Err(err) => return Err(err),
-            Ok(_) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
         }
     }
     write_buf.advance(written);
@@ -140,7 +140,6 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            reserve_buf(&mut rsp_buf);
             while let Some(req) = request::decode(&mut req_buf)? {
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
@@ -151,9 +150,6 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                     }
                 }
             }
-
-            // we still need to reuse the body buf
-            reserve_buf(&mut body_buf);
         }
 
         // write out the responses
@@ -181,7 +177,6 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -
 
         // prepare the requests
         if read_cnt > 0 {
-            reserve_buf(&mut rsp_buf);
             while let Some(req) = request::decode(&mut req_buf)? {
                 let mut rsp = Response::new(&mut body_buf);
                 if let Err(e) = service.call(req, &mut rsp) {
@@ -191,9 +186,6 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -
                     response::encode(rsp, &mut rsp_buf);
                 }
             }
-
-            // we still need to reuse the body buf
-            reserve_buf(&mut body_buf);
         }
 
         // send the result back to client
