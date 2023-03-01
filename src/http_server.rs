@@ -76,29 +76,33 @@ fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
 #[cfg(unix)]
 #[inline]
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
+    let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
+    let len = read_buf.len();
     let mut read_cnt = 0;
-    loop {
-        let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
-        assert!(!read_buf.is_empty());
-        match stream.read(read_buf) {
-            Ok(n) if n > 0 => {
-                read_cnt += n;
-                unsafe { req_buf.advance_mut(n) };
-            }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(read_cnt),
-            Ok(_) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
+    while read_cnt < len {
+        match stream.read(unsafe { read_buf.get_unchecked_mut(read_cnt..) }) {
+            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
+            Ok(n) => read_cnt += n,
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
             Err(err) => return Err(err),
         }
     }
+
+    unsafe { req_buf.advance_mut(read_cnt) };
+    Ok(read_cnt)
 }
 
 #[cfg(unix)]
 #[inline]
 fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Result<usize> {
     let len = write_buf.len();
+    if len == 0 {
+        return Ok(0);
+    }
+
     let mut written = 0;
     while written < len {
-        match stream.write(&write_buf[written..]) {
+        match stream.write(unsafe { write_buf.get_unchecked(written..) }) {
             Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
             Ok(n) => written += n,
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
@@ -154,9 +158,11 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // write out the responses
         nonblock_write(inner_stream, &mut rsp_buf)?;
-        stream.wait_io();
+
+        if read_cnt == 0 {
+            stream.wait_io();
+        }
     }
-    // stream.shutdown(std::net::Shutdown::Both).ok();
 }
 
 #[cfg(not(unix))]
