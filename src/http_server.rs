@@ -168,9 +168,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
         // write out the responses
         nonblock_write(inner_stream, &mut rsp_buf)?;
 
-        if read_cnt == 0 {
-            stream.wait_io();
-        }
+        stream.wait_io();
     }
 }
 
