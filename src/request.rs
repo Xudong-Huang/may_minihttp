@@ -5,13 +5,13 @@ use std::{fmt, io};
 
 const MAX_HEADERS: usize = 16;
 
-pub struct Request {
-    req: httparse::Request<'static, 'static>,
-    _headers: [MaybeUninit<httparse::Header<'static>>; MAX_HEADERS],
-    _data: BytesMut,
+pub struct Request<'a> {
+    req: httparse::Request<'a, 'a>,
+    _headers: [MaybeUninit<httparse::Header<'a>>; MAX_HEADERS],
+    data: &'a [u8],
 }
 
-impl Request {
+impl<'a> Request<'a> {
     pub fn method(&self) -> &str {
         self.req.method.unwrap()
     }
@@ -31,19 +31,21 @@ impl Request {
     pub fn body(&self) -> &[u8] {
         unimplemented!()
     }
+
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.data.len()
+    }
 }
 
-impl fmt::Debug for Request {
+impl<'a> fmt::Debug for Request<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<HTTP Request {} {}>", self.method(), self.path())
     }
 }
 
-pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
-    let mut headers = unsafe {
-        MaybeUninit::<[MaybeUninit<httparse::Header<'_>>; MAX_HEADERS]>::uninit().assume_init()
-    };
-
+pub fn decode(buf: &BytesMut) -> io::Result<Option<Request>> {
+    let mut headers = [MaybeUninit::<httparse::Header<'_>>::uninit(); MAX_HEADERS];
     let mut req = httparse::Request::new(&mut []);
 
     let status = match req.parse_with_uninit_headers(buf, &mut headers) {
@@ -61,7 +63,7 @@ pub fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
 
     Ok(Some(Request {
         req: unsafe { std::mem::transmute(req) },
-        _headers: unsafe { std::mem::transmute(headers) },
-        _data: buf.split_to(amt),
+        _headers: headers,
+        data: &buf[..amt],
     }))
 }

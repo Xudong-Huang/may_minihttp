@@ -147,7 +147,8 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            while let Some(req) = request::decode(&mut req_buf)? {
+            while let Some(req) = request::decode(&req_buf)? {
+                let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
@@ -156,6 +157,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                         response::encode(err_rsp, &mut rsp_buf);
                     }
                 }
+                req_buf.advance(len);
             }
         }
 
@@ -185,6 +187,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -
         // prepare the requests
         if read_cnt > 0 {
             while let Some(req) = request::decode(&mut req_buf)? {
+                let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 if let Err(e) = service.call(req, &mut rsp) {
                     let err_rsp = internal_error_rsp(e, &mut body_buf);
@@ -192,6 +195,7 @@ fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -
                 } else {
                     response::encode(rsp, &mut rsp_buf);
                 }
+                req_buf.advance(len);
             }
         }
 
