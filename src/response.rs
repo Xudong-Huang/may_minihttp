@@ -5,6 +5,8 @@ use std::io;
 pub struct Response<'a> {
     headers: [&'static str; 16],
     headers_len: usize,
+    // when set header would be ignored, only `Date` header would be appended
+    fixed_header: &'static [u8],
     status_message: StatusMessage,
     body: Body,
     rsp_buf: &'a mut BytesMut,
@@ -28,6 +30,7 @@ impl<'a> Response<'a> {
         Response {
             headers,
             headers_len: 0,
+            fixed_header: b"",
             body: Body::Dummy,
             status_message: StatusMessage {
                 code: "200",
@@ -37,25 +40,37 @@ impl<'a> Response<'a> {
         }
     }
 
+    #[inline]
     pub fn status_code(&mut self, code: &'static str, msg: &'static str) -> &mut Self {
         self.status_message = StatusMessage { code, msg };
         self
     }
 
+    #[inline]
     pub fn header(&mut self, header: &'static str) -> &mut Self {
         self.headers[self.headers_len] = header;
         self.headers_len += 1;
         self
     }
 
+    /// when set static header, the `header` is not used any more
+    #[inline]
+    pub fn fixed_header(&mut self, header: &'static [u8]) -> &mut Self {
+        self.fixed_header = header;
+        self
+    }
+
+    #[inline]
     pub fn body(&mut self, s: &'static str) {
         self.body = Body::Str(s);
     }
 
+    #[inline]
     pub fn body_vec(&mut self, v: Vec<u8>) {
         self.body = Body::Vec(v);
     }
 
+    #[inline]
     pub fn body_mut(&mut self) -> &mut BytesMut {
         match self.body {
             Body::Dummy => {}
@@ -71,6 +86,7 @@ impl<'a> Response<'a> {
         self.rsp_buf
     }
 
+    #[inline]
     fn body_len(&self) -> usize {
         match self.body {
             Body::Dummy => self.rsp_buf.len(),
@@ -79,6 +95,7 @@ impl<'a> Response<'a> {
         }
     }
 
+    #[inline]
     fn get_body(&mut self) -> &[u8] {
         match self.body {
             Body::Dummy => self.rsp_buf.as_ref(),
@@ -87,6 +104,7 @@ impl<'a> Response<'a> {
         }
     }
 
+    #[inline]
     fn clear_body(&mut self) {
         match self.body {
             Body::Dummy => self.rsp_buf.clear(),
@@ -96,30 +114,38 @@ impl<'a> Response<'a> {
     }
 }
 
-pub fn encode(mut msg: Response, buf: &mut BytesMut) {
-    if msg.status_message.msg == "Ok" {
+pub fn encode(mut rsp: Response, buf: &mut BytesMut) {
+    if !rsp.fixed_header.is_empty() {
+        buf.extend_from_slice(rsp.fixed_header);
+        buf.extend_from_slice(&crate::date::get_date_header());
+        buf.extend_from_slice(rsp.get_body());
+        rsp.clear_body();
+        return;
+    }
+
+    if rsp.status_message.msg == "Ok" {
         buf.extend_from_slice(b"HTTP/1.1 200 Ok\r\nServer: M\r\nDate: ");
     } else {
         buf.extend_from_slice(b"HTTP/1.1 ");
-        buf.extend_from_slice(msg.status_message.code.as_bytes());
+        buf.extend_from_slice(rsp.status_message.code.as_bytes());
         buf.extend_from_slice(b" ");
-        buf.extend_from_slice(msg.status_message.msg.as_bytes());
+        buf.extend_from_slice(rsp.status_message.msg.as_bytes());
         buf.extend_from_slice(b"\r\nServer: M\r\nDate: ");
     }
-    crate::date::set_date(buf);
+    crate::date::append_date(buf);
     buf.extend_from_slice(b"\r\nContent-Length: ");
     let mut length = itoa::Buffer::new();
-    buf.extend_from_slice(length.format(msg.body_len()).as_bytes());
+    buf.extend_from_slice(length.format(rsp.body_len()).as_bytes());
 
-    for i in 0..msg.headers_len {
-        let h = *unsafe { msg.headers.get_unchecked(i) };
+    for i in 0..rsp.headers_len {
+        let h = *unsafe { rsp.headers.get_unchecked(i) };
         buf.extend_from_slice(b"\r\n");
         buf.extend_from_slice(h.as_bytes());
     }
 
     buf.extend_from_slice(b"\r\n\r\n");
-    buf.extend_from_slice(msg.get_body());
-    msg.clear_body();
+    buf.extend_from_slice(rsp.get_body());
+    rsp.clear_body();
 }
 
 // impl io::Write for the response body
