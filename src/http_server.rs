@@ -44,10 +44,16 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
         go!(
             coroutine::Builder::new().name("TcpServerFac".to_owned()),
             move || {
+                #[cfg(unix)]
                 use std::os::fd::AsRawFd;
+                #[cfg(windows)]
+                use std::os::windows::io::AsRawSocket;
                 for stream in listener.incoming() {
                     let mut stream = t_c!(stream);
+                    #[cfg(unix)]
                     let id = stream.as_raw_fd() as usize;
+                    #[cfg(windows)]
+                    let id = stream.as_raw_socket() as usize;
                     // t_c!(stream.set_nodelay(true));
                     let service = self.new_service(id);
                     go!(
@@ -166,7 +172,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 }
 
 #[cfg(not(unix))]
-fn each_connection_loop<T: HttpService>(mut stream: TcpStream, mut service: T) -> io::Result<()> {
+fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) -> io::Result<()> {
     let mut req_buf = BytesMut::with_capacity(BUF_LEN);
     let mut rsp_buf = BytesMut::with_capacity(BUF_LEN);
     let mut body_buf = BytesMut::with_capacity(BUF_LEN);
