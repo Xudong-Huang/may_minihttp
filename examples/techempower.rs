@@ -12,11 +12,6 @@ use nanorand::{Rng, WyRand};
 use smallvec::SmallVec;
 use yarte::{ywrite_html, Serialize};
 
-const JSON: &[u8] =
-    b"HTTP/1.1 200 OK\r\nServer: M\r\nContent-Type: application/json\r\nContent-Length: 27\r\n";
-const PLAIN: &[u8] =
-    b"HTTP/1.1 200 OK\r\nServer: M\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n";
-
 mod utils {
     use atoi::FromRadix10;
 
@@ -233,14 +228,14 @@ impl HttpService for Techempower {
         // Bare-bones router
         match req.path() {
             "/json" => {
-                rsp.fixed_header(JSON);
+                rsp.header("Content-Type: application/json");
                 let msg = HelloMessage {
                     message: "Hello, World!",
                 };
                 msg.to_bytes_mut(rsp.body_mut());
             }
             "/plaintext" => {
-                rsp.fixed_header(PLAIN).body("Hello, World!");
+                rsp.header("Content-Type: text/plain").body("Hello, World!");
             }
             "/db" => {
                 rsp.header("Content-Type: application/json");

@@ -5,8 +5,6 @@ use std::io;
 pub struct Response<'a> {
     headers: [&'static str; 16],
     headers_len: usize,
-    // when set header would be ignored, only `Date` header would be appended
-    fixed_header: &'static [u8],
     status_message: StatusMessage,
     body: Body,
     rsp_buf: &'a mut BytesMut,
@@ -30,7 +28,6 @@ impl<'a> Response<'a> {
         Response {
             headers,
             headers_len: 0,
-            fixed_header: b"",
             body: Body::Dummy,
             status_message: StatusMessage {
                 code: "200",
@@ -50,13 +47,6 @@ impl<'a> Response<'a> {
     pub fn header(&mut self, header: &'static str) -> &mut Self {
         self.headers[self.headers_len] = header;
         self.headers_len += 1;
-        self
-    }
-
-    /// when set static header, the `header` is not used any more
-    #[inline]
-    pub fn fixed_header(&mut self, header: &'static [u8]) -> &mut Self {
-        self.fixed_header = header;
         self
     }
 
@@ -115,14 +105,6 @@ impl<'a> Response<'a> {
 }
 
 pub fn encode(mut rsp: Response, buf: &mut BytesMut) {
-    if !rsp.fixed_header.is_empty() {
-        buf.extend_from_slice(rsp.fixed_header);
-        buf.extend_from_slice(&crate::date::get_date_header());
-        buf.extend_from_slice(rsp.get_body());
-        rsp.clear_body();
-        return;
-    }
-
     if rsp.status_message.msg == "Ok" {
         buf.extend_from_slice(b"HTTP/1.1 200 Ok\r\nServer: M\r\nDate: ");
     } else {

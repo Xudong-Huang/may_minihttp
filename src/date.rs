@@ -28,15 +28,6 @@ pub fn append_date(dst: &mut BytesMut) {
     dst.extend_from_slice(date.as_bytes());
 }
 
-#[doc(hidden)]
-#[inline]
-pub fn get_date_header() -> [u8; 39] {
-    let mut date_buf: [u8; 39] = *b"Date: _____________________________\r\n\r\n";
-    let date = unsafe { &*CURRENT_DATE.0.get() };
-    date_buf[6..35].copy_from_slice(date.as_bytes());
-    date_buf
-}
-
 struct Date {
     bytes: [u8; DATE_VALUE_LENGTH],
 }
