@@ -3,15 +3,14 @@ use bytes::BytesMut;
 use std::mem::MaybeUninit;
 use std::{fmt, io};
 
-const MAX_HEADERS: usize = 16;
+pub(crate) const MAX_HEADERS: usize = 16;
 
-pub struct Request<'a> {
-    req: httparse::Request<'a, 'a>,
-    _headers: [MaybeUninit<httparse::Header<'a>>; MAX_HEADERS],
+pub struct Request<'a, 'header> {
+    req: httparse::Request<'header, 'a>,
     data: &'a [u8],
 }
 
-impl<'a> Request<'a> {
+impl<'a, 'header> Request<'a, 'header> {
     pub fn method(&self) -> &str {
         self.req.method.unwrap()
     }
@@ -38,17 +37,19 @@ impl<'a> Request<'a> {
     }
 }
 
-impl<'a> fmt::Debug for Request<'a> {
+impl<'a, 'header> fmt::Debug for Request<'a, 'header> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<HTTP Request {} {}>", self.method(), self.path())
     }
 }
 
-pub fn decode(buf: &BytesMut) -> io::Result<Option<Request>> {
-    let mut headers = [MaybeUninit::<httparse::Header<'_>>::uninit(); MAX_HEADERS];
+pub fn decode<'a, 'header>(
+    buf: &'a BytesMut,
+    headers: &'header mut [MaybeUninit<httparse::Header<'a>>; MAX_HEADERS],
+) -> io::Result<Option<Request<'a, 'header>>> {
     let mut req = httparse::Request::new(&mut []);
 
-    let status = match req.parse_with_uninit_headers(buf, &mut headers) {
+    let status = match req.parse_with_uninit_headers(buf, headers) {
         Ok(s) => s,
         Err(e) => {
             let msg = format!("failed to parse http request: {e:?}");
@@ -62,8 +63,7 @@ pub fn decode(buf: &BytesMut) -> io::Result<Option<Request>> {
     };
 
     Ok(Some(Request {
-        req: unsafe { std::mem::transmute(req) },
-        _headers: headers,
+        req,
         data: &buf[..amt],
     }))
 }

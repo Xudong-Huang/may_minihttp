@@ -1,9 +1,11 @@
 use bytes::BytesMut;
 
+use crate::request::MAX_HEADERS;
+
 use std::io;
 
 pub struct Response<'a> {
-    headers: [&'static str; 16],
+    headers: [&'static str; MAX_HEADERS],
     headers_len: usize,
     status_message: StatusMessage,
     body: Body,
@@ -119,11 +121,12 @@ pub fn encode(mut rsp: Response, buf: &mut BytesMut) {
     let mut length = itoa::Buffer::new();
     buf.extend_from_slice(length.format(rsp.body_len()).as_bytes());
 
-    for i in 0..rsp.headers_len {
-        let h = *unsafe { rsp.headers.get_unchecked(i) };
+    // SAFETY: we already have bound check when insert headers
+    let headers = unsafe { rsp.headers.get_unchecked(..rsp.headers_len) };
+    headers.iter().for_each(|h| {
         buf.extend_from_slice(b"\r\n");
         buf.extend_from_slice(h.as_bytes());
-    }
+    });
 
     buf.extend_from_slice(b"\r\n\r\n");
     buf.extend_from_slice(rsp.get_body());

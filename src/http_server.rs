@@ -1,9 +1,10 @@
 //! http server implementation on top of `MAY`
 
 use std::io::{self, Read, Write};
+use std::mem::MaybeUninit;
 use std::net::ToSocketAddrs;
 
-use crate::request::{self, Request};
+use crate::request::{self, Request, MAX_HEADERS};
 use crate::response::{self, Response};
 use bytes::{Buf, BufMut, BytesMut};
 #[cfg(unix)]
@@ -151,7 +152,8 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            while let Some(req) = request::decode(&req_buf)? {
+            let mut headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
+            while let Some(req) = request::decode(&req_buf, &mut headers)? {
                 let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
@@ -161,6 +163,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                         response::encode(err_rsp, &mut rsp_buf);
                     }
                 }
+                headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
                 req_buf.advance(len);
             }
         }
@@ -190,7 +193,8 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            while let Some(req) = request::decode(&req_buf)? {
+            let mut headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
+            while let Some(req) = request::decode(&req_buf, &mut headers)? {
                 let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 if let Err(e) = service.call(req, &mut rsp) {
@@ -199,6 +203,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                 } else {
                     response::encode(rsp, &mut rsp_buf);
                 }
+                headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
                 req_buf.advance(len);
             }
         }
