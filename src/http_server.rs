@@ -5,9 +5,7 @@ use std::net::ToSocketAddrs;
 
 use crate::request::{self, Request};
 use crate::response::{self, Response};
-#[cfg(unix)]
-use bytes::Buf;
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 #[cfg(unix)]
 use may::io::WaitIo;
 use may::net::{TcpListener, TcpStream};
@@ -192,7 +190,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            while let Some(req) = request::decode(&mut req_buf)? {
+            while let Some(req) = request::decode(&req_buf)? {
                 let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 if let Err(e) = service.call(req, &mut rsp) {
