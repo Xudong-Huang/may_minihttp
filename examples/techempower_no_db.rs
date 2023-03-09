@@ -25,7 +25,7 @@ impl HttpService for Techempower {
                 rsp.header("Content-Type: text/plain").body("Hello, World!");
             }
             _ => {
-                rsp.status_code("404", "Not Found");
+                rsp.status_code(404, "Not Found");
             }
         }
 

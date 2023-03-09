@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 use std::mem::MaybeUninit;
 use std::net::ToSocketAddrs;
 
-use crate::request::{self, Request, MAX_HEADERS};
+use crate::request::{self, Request};
 use crate::response::{self, Response};
 use bytes::{Buf, BufMut, BytesMut};
 #[cfg(unix)]
@@ -68,17 +68,6 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
             }
         )
     }
-}
-
-fn internal_error_rsp(e: io::Error, buf: &mut BytesMut) -> Response {
-    error!("error in service: err = {:?}", e);
-    buf.clear();
-    let mut err_rsp = Response::new(buf);
-    err_rsp.status_code("500", "Internal Server Error");
-    err_rsp
-        .body_mut()
-        .extend_from_slice(e.to_string().as_bytes());
-    err_rsp
 }
 
 #[cfg(unix)]
@@ -152,18 +141,15 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            let mut headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
+            let mut headers = unsafe { MaybeUninit::uninit().assume_init() };
             while let Some(req) = request::decode(&req_buf, &mut headers)? {
                 let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
-                    Err(e) => {
-                        let err_rsp = internal_error_rsp(e, &mut body_buf);
-                        response::encode(err_rsp, &mut rsp_buf);
-                    }
+                    Err(e) => response::encode_error(e, &mut rsp_buf),
                 }
-                headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
+                headers = unsafe { std::mem::transmute(headers) };
                 req_buf.advance(len);
             }
         }
@@ -197,11 +183,9 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
             while let Some(req) = request::decode(&req_buf, &mut headers)? {
                 let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
-                if let Err(e) = service.call(req, &mut rsp) {
-                    let err_rsp = internal_error_rsp(e, &mut body_buf);
-                    response::encode(err_rsp, &mut rsp_buf);
-                } else {
-                    response::encode(rsp, &mut rsp_buf);
+                match service.call(req, &mut rsp) {
+                    Ok(()) => response::encode(rsp, &mut rsp_buf),
+                    Err(e) => response::encode_error(e, &mut rsp_buf),
                 }
                 headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
                 req_buf.advance(len);

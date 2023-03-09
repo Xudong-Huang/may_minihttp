@@ -260,7 +260,7 @@ impl HttpService for Techempower {
                 worlds.to_bytes_mut(rsp.body_mut());
             }
             _ => {
-                rsp.status_code("404", "Not Found");
+                rsp.status_code(404, "Not Found");
             }
         }
 

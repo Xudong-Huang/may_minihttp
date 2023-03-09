@@ -8,10 +8,10 @@ struct StatusService;
 impl HttpService for StatusService {
     fn call(&mut self, req: Request, rsp: &mut Response) -> io::Result<()> {
         let (code, message) = match req.path() {
-            "/200" => ("200", "OK"),
-            "/400" => ("400", "Bad Request"),
-            "/500" => ("500", "Internal Server Error"),
-            _ => ("404", "Not Found"),
+            "/200" => (200, "OK"),
+            "/400" => (400, "Bad Request"),
+            "/500" => (500, "Internal Server Error"),
+            _ => (404, "Not Found"),
         };
 
         rsp.status_code(code, message);

@@ -7,7 +7,7 @@ pub(crate) const MAX_HEADERS: usize = 16;
 
 pub struct Request<'a, 'header> {
     req: httparse::Request<'header, 'a>,
-    data: &'a [u8],
+    len: usize,
 }
 
 impl<'a, 'header> Request<'a, 'header> {
@@ -33,7 +33,7 @@ impl<'a, 'header> Request<'a, 'header> {
 
     #[inline]
     pub(crate) fn len(&self) -> usize {
-        self.data.len()
+        self.len
     }
 }
 
@@ -57,13 +57,10 @@ pub fn decode<'a, 'header>(
         }
     };
 
-    let amt = match status {
+    let len = match status {
         httparse::Status::Complete(amt) => amt,
         httparse::Status::Partial => return Ok(None),
     };
 
-    Ok(Some(Request {
-        req,
-        data: &buf[..amt],
-    }))
+    Ok(Some(Request { req, len }))
 }

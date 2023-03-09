@@ -19,7 +19,7 @@ enum Body {
 }
 
 struct StatusMessage {
-    code: &'static str,
+    code: usize,
     msg: &'static str,
 }
 
@@ -32,7 +32,7 @@ impl<'a> Response<'a> {
             headers_len: 0,
             body: Body::Dummy,
             status_message: StatusMessage {
-                code: "200",
+                code: 200,
                 msg: "Ok",
             },
             rsp_buf,
@@ -40,7 +40,7 @@ impl<'a> Response<'a> {
     }
 
     #[inline]
-    pub fn status_code(&mut self, code: &'static str, msg: &'static str) -> &mut Self {
+    pub fn status_code(&mut self, code: usize, msg: &'static str) -> &mut Self {
         self.status_message = StatusMessage { code, msg };
         self
     }
@@ -95,23 +95,21 @@ impl<'a> Response<'a> {
             Body::Vec(ref v) => v,
         }
     }
+}
 
-    #[inline]
-    fn clear_body(&mut self) {
-        match self.body {
-            Body::Dummy => self.rsp_buf.clear(),
-            Body::Str(_) => {}
-            Body::Vec(_) => {}
-        }
+impl<'a> Drop for Response<'a> {
+    fn drop(&mut self) {
+        unsafe { self.rsp_buf.set_len(0) };
     }
 }
 
 pub fn encode(mut rsp: Response, buf: &mut BytesMut) {
-    if rsp.status_message.msg == "Ok" {
+    if rsp.status_message.code == 200 {
         buf.extend_from_slice(b"HTTP/1.1 200 Ok\r\nServer: M\r\nDate: ");
     } else {
         buf.extend_from_slice(b"HTTP/1.1 ");
-        buf.extend_from_slice(rsp.status_message.code.as_bytes());
+        let mut code = itoa::Buffer::new();
+        buf.extend_from_slice(code.format(rsp.status_message.code).as_bytes());
         buf.extend_from_slice(b" ");
         buf.extend_from_slice(rsp.status_message.msg.as_bytes());
         buf.extend_from_slice(b"\r\nServer: M\r\nDate: ");
@@ -123,14 +121,28 @@ pub fn encode(mut rsp: Response, buf: &mut BytesMut) {
 
     // SAFETY: we already have bound check when insert headers
     let headers = unsafe { rsp.headers.get_unchecked(..rsp.headers_len) };
-    headers.iter().for_each(|h| {
+    for h in headers {
         buf.extend_from_slice(b"\r\n");
         buf.extend_from_slice(h.as_bytes());
-    });
+    }
 
     buf.extend_from_slice(b"\r\n\r\n");
     buf.extend_from_slice(rsp.get_body());
-    rsp.clear_body();
+}
+
+pub fn encode_error(e: io::Error, buf: &mut BytesMut) {
+    error!("error in service: err = {:?}", e);
+    let msg_string = e.to_string();
+    let msg = msg_string.as_bytes();
+
+    buf.extend_from_slice(b"HTTP/1.1 500 Internal Server Error\r\nServer: M\r\nDate: ");
+    crate::date::append_date(buf);
+    buf.extend_from_slice(b"\r\nContent-Length: ");
+    let mut length = itoa::Buffer::new();
+    buf.extend_from_slice(length.format(msg.len()).as_bytes());
+
+    buf.extend_from_slice(b"\r\n\r\n");
+    buf.extend_from_slice(msg);
 }
 
 // impl io::Write for the response body
