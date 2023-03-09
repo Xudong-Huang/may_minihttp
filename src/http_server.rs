@@ -179,7 +179,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            let mut headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
+            let mut headers = [MaybeUninit::<httparse::Header>::uninit(); request::MAX_HEADERS];
             while let Some(req) = request::decode(&req_buf, &mut headers)? {
                 let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
@@ -187,7 +187,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
                     Err(e) => response::encode_error(e, &mut rsp_buf),
                 }
-                headers = [MaybeUninit::<httparse::Header>::uninit(); MAX_HEADERS];
+                headers = [MaybeUninit::<httparse::Header>::uninit(); request::MAX_HEADERS];
                 req_buf.advance(len);
             }
         }
