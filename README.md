@@ -24,18 +24,17 @@ extern crate may_minihttp;
 use std::io;
 use may_minihttp::{HttpServer, HttpService, Request, Response};
 
-// implement the `HttpService` trait for your service
+#[derive(Clone)]
 struct HelloWorld;
 
 impl HttpService for HelloWorld {
-    fn call(&self, _request: Request) -> io::Result<Response> {
-        let mut resp = Response::new();
-        resp.body("Hello, world!");
-        Ok(resp)
+    fn call(&mut self, _req: Request, res: &mut Response) -> io::Result<()> {
+        res.body("Hello, world!");
+        Ok(())
     }
 }
 
-// start the server in main
+// Start the server in `main`.
 fn main() {
     let server = HttpServer(HelloWorld).start("0.0.0.0:8080").unwrap();
     server.join().unwrap();
