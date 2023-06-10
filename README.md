@@ -75,6 +75,10 @@ Requests/sec: 116181.73
 Transfer/sec:     11.41MB
 ```
 
+## Benchmarks
+
+One of the fastest web frameworks available according to the [TechEmpower Framework Benchmark](https://www.techempower.com/benchmarks/#section=data-r21&test=composite).
+
 # License
 
 This project is licensed under either of
