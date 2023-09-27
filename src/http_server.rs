@@ -73,20 +73,19 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
 #[cfg(unix)]
 #[inline]
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
-    let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
-    let len = read_buf.len();
     let mut read_cnt = 0;
-    while read_cnt < len {
-        match stream.read(unsafe { read_buf.get_unchecked_mut(read_cnt..) }) {
+    loop {
+        let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
+        match stream.read(read_buf) {
             Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
-            Ok(n) => read_cnt += n,
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+            Ok(n) => {
+                read_cnt += n;
+                unsafe { req_buf.advance_mut(n) };
+            }
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(read_cnt),
             Err(err) => return Err(err),
         }
     }
-
-    unsafe { req_buf.advance_mut(read_cnt) };
-    Ok(read_cnt)
 }
 
 #[cfg(unix)]
