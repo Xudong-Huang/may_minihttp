@@ -6,6 +6,7 @@ use std::{fmt, io};
 pub(crate) const MAX_HEADERS: usize = 16;
 
 pub struct Request<'a, 'header> {
+    body: &'a [u8],
     req: httparse::Request<'header, 'a>,
     len: usize,
 }
@@ -28,7 +29,7 @@ impl<'a, 'header> Request<'a, 'header> {
     }
 
     pub fn body(&self) -> &[u8] {
-        unimplemented!()
+        &self.body
     }
 
     #[inline]
@@ -62,5 +63,7 @@ pub fn decode<'a, 'header>(
         httparse::Status::Partial => return Ok(None),
     };
 
-    Ok(Some(Request { req, len }))
+    let body = &buf[len..];
+    let len = len + body.len();
+    Ok(Some(Request { req, body, len }))
 }
