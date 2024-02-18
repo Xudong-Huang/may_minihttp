@@ -10,7 +10,7 @@ pub(crate) const MAX_HEADERS: usize = 16;
 pub struct BodyReader<'a, 'stream> {
     // remaining bytes for body
     body_buf: &'a [u8],
-    // track how many bytes have been read from the body
+    // track how many bytes have been read from the body_buf
     body_offset: usize,
     // the max body length limit
     body_limit: usize,
@@ -35,13 +35,57 @@ impl<'a, 'stream> BodyReader<'a, 'stream> {
         self.body_offset
     }
 
-    fn set_body_buf(&mut self, body_buf: &'a [u8]) {
-        self.body_buf = body_buf;
-        self.body_offset = 0;
+    pub fn body_limit(&self) -> usize {
+        self.body_limit
     }
 
     fn set_body_limit(&mut self, body_limit: usize) {
         self.body_limit = body_limit;
+    }
+
+    fn set_body_buf(&mut self, body_buf: &'a [u8]) {
+        self.body_buf = body_buf;
+        self.body_offset = 0;
+    }
+}
+
+impl<'a, 'stream> Read for BodyReader<'a, 'stream> {
+    // the user should control the body reading, don't exceeds the body!
+    // FIXME: deal with partial body
+    // FIXME: deal with next request header
+    // TODO: support chunked encoding
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.total_read >= self.body_limit {
+            return Ok(0);
+        }
+
+        let body_offset = self.body_offset;
+        let remaining = self.body_buf.len() - body_offset;
+        if remaining > 0 {
+            let n = buf.len().min(remaining);
+            unsafe {
+                buf.as_mut_ptr()
+                    .copy_from_nonoverlapping(self.body_buf.as_ptr().add(body_offset), n)
+            }
+            self.total_read += n;
+            self.body_offset = body_offset + n;
+            // println!(
+            //     "buf: {}, offset={}",
+            //     std::str::from_utf8(buf).unwrap(),
+            //     body_offset + n
+            // );
+            Ok(n)
+        } else {
+            // perform nonblock_read
+            match self.stream.inner_mut().read(buf) {
+                Ok(n) => {
+                    self.total_read += n;
+                    Ok(n)
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(0),
+                Err(e) => Err(e),
+            }
+        }
     }
 }
 
@@ -90,45 +134,6 @@ impl<'a, 'header, 'stream, 'body> Request<'a, 'header, 'stream, 'body> {
             }
         }
         len
-    }
-}
-
-impl<'a, 'stream> Read for BodyReader<'a, 'stream> {
-    // the user should control the body reading, don't exceeds the body!
-    // FIXME: deal with partial body
-    // FIXME: deal with next request header
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.total_read >= self.body_limit {
-            return Ok(0);
-        }
-
-        let body_offset = self.body_offset;
-        let remaining = self.body_buf.len() - body_offset;
-        if remaining > 0 {
-            let n = buf.len().min(remaining);
-            unsafe {
-                buf.as_mut_ptr()
-                    .copy_from_nonoverlapping(self.body_buf.as_ptr().add(body_offset), n)
-            }
-            self.total_read += n;
-            self.body_offset = body_offset + n;
-            // println!(
-            //     "buf: {}, offset={}",
-            //     std::str::from_utf8(buf).unwrap(),
-            //     body_offset + n
-            // );
-            Ok(n)
-        } else {
-            // perform nonblock_read
-            match self.stream.inner_mut().read(buf) {
-                Ok(n) => {
-                    self.total_read += n;
-                    Ok(n)
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(0),
-                Err(e) => Err(e),
-            }
-        }
     }
 }
 

@@ -5,7 +5,6 @@ struct HelloJson;
 
 impl HttpService for HelloJson {
     fn call(&mut self, mut req: Request, rsp: &mut Response) -> std::io::Result<()> {
-        // println!("req: {:?}", std::str::from_utf8(req.body()).unwrap());
         let body = req.body();
         let value: serde_json::Value = serde_json::from_reader(body)?;
         println!("value: {:?}", value);
