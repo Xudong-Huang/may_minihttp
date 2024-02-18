@@ -163,7 +163,7 @@ pub fn decode<'a, 'header, 'stream, 'body>(
         httparse::Status::Complete(amt) => amt,
         httparse::Status::Partial => return Ok(None),
     };
-    println!("req: {:?}", std::str::from_utf8(buf).unwrap());
+    // println!("req: {:?}", std::str::from_utf8(buf).unwrap());
 
     body.set_body_buf(&buf[len..]);
 
