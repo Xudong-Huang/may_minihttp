@@ -144,7 +144,9 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
         // prepare the requests
         if read_cnt > 0 {
             let mut headers = unsafe { MaybeUninit::uninit().assume_init() };
-            while let Some(req) = request::decode(&req_buf, &mut headers)? {
+            let mut body_offset = 0;
+            while let Some(req) = request::decode(&req_buf, &mut headers, stream, &mut body_offset)?
+            {
                 let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
@@ -152,7 +154,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                     Err(e) => response::encode_error(e, &mut rsp_buf),
                 }
                 headers = unsafe { std::mem::transmute(headers) };
-                req_buf.advance(len);
+                req_buf.advance(len + body_offset);
             }
         }
 
