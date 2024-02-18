@@ -125,6 +125,8 @@ pub struct HttpServer<T>(pub T);
 
 #[cfg(unix)]
 fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) -> io::Result<()> {
+    use crate::BodyReader;
+
     let mut req_buf = BytesMut::with_capacity(BUF_LEN);
     let mut rsp_buf = BytesMut::with_capacity(BUF_LEN);
     let mut body_buf = BytesMut::with_capacity(BUF_LEN);
@@ -143,18 +145,20 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            let mut headers = unsafe { MaybeUninit::uninit().assume_init() };
-            let mut body_offset = 0;
-            while let Some(req) = request::decode(&req_buf, &mut headers, stream, &mut body_offset)?
-            {
+            loop {
+                let mut body = BodyReader::new(stream);
+                let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
+                let req = match request::decode(&req_buf, &mut body, &mut headers)? {
+                    Some(req) => req,
+                    None => break,
+                };
                 let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
                     Err(e) => response::encode_error(e, &mut rsp_buf),
                 }
-                headers = unsafe { std::mem::transmute(headers) };
-                req_buf.advance(len + body_offset);
+                req_buf.advance(len + body.body_offset());
             }
         }
 
