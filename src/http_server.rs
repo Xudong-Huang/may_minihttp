@@ -6,7 +6,9 @@ use std::net::ToSocketAddrs;
 
 use crate::request::{self, Request};
 use crate::response::{self, Response};
-use bytes::{Buf, BufMut, BytesMut};
+#[cfg(unix)]
+use bytes::Buf;
+use bytes::{BufMut, BytesMut};
 #[cfg(unix)]
 use may::io::WaitIo;
 use may::net::{TcpListener, TcpStream};
@@ -181,21 +183,22 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            let mut headers = [MaybeUninit::<httparse::Header>::uninit(); request::MAX_HEADERS];
-            while let Some(req) = request::decode(&req_buf, &mut headers)? {
-                let len = req.len();
+            loop {
+                let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
+                let req = match request::decode(&mut headers, &mut req_buf, stream)? {
+                    Some(req) => req,
+                    None => break,
+                };
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
                     Err(e) => response::encode_error(e, &mut rsp_buf),
                 }
-                headers = [MaybeUninit::<httparse::Header>::uninit(); request::MAX_HEADERS];
-                req_buf.advance(len);
             }
         }
 
         // send the result back to client
-        stream.write_all(rsp_buf.as_ref())?;
+        stream.write_all(&rsp_buf)?;
     }
 }
 
