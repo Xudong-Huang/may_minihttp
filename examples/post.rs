@@ -4,8 +4,11 @@ use may_minihttp::{BodyWriter, HttpServer, HttpService, Request, Response};
 struct HelloJson;
 
 impl HttpService for HelloJson {
-    fn call(&mut self, mut req: Request, rsp: &mut Response) -> std::io::Result<()> {
+    fn call(&mut self, req: Request, rsp: &mut Response) -> std::io::Result<()> {
+        let method = req.method();
+        println!("method: {:?}", method);
         let body = req.body();
+        println!("body_limit: {:?}", body.body_limit());
         let value: serde_json::Value = serde_json::from_reader(body)?;
         println!("value: {:?}", value);
         rsp.header("Content-Type: application/json");

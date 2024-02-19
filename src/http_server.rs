@@ -75,7 +75,7 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
     let mut read_cnt = 0;
     loop {
-        let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
+        let read_buf: &mut [u8] = unsafe { std::mem::transmute(req_buf.chunk_mut()) };
         match stream.read(read_buf) {
             Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
             Ok(n) => {
@@ -111,7 +111,7 @@ fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Resu
 
 const BUF_LEN: usize = 4096 * 8;
 #[inline]
-fn reserve_buf(buf: &mut BytesMut) {
+pub(crate) fn reserve_buf(buf: &mut BytesMut) {
     let capacity = buf.capacity();
     if capacity < 1024 {
         buf.reserve(BUF_LEN - capacity);
@@ -125,8 +125,6 @@ pub struct HttpServer<T>(pub T);
 
 #[cfg(unix)]
 fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) -> io::Result<()> {
-    use crate::BodyReader;
-
     let mut req_buf = BytesMut::with_capacity(BUF_LEN);
     let mut rsp_buf = BytesMut::with_capacity(BUF_LEN);
     let mut body_buf = BytesMut::with_capacity(BUF_LEN);
@@ -146,19 +144,16 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
         // prepare the requests
         if read_cnt > 0 {
             loop {
-                let mut body = BodyReader::new(stream);
                 let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
-                let req = match request::decode(&req_buf, &mut body, &mut headers)? {
+                let req = match request::decode(&mut headers, &mut req_buf, stream)? {
                     Some(req) => req,
                     None => break,
                 };
-                let len = req.len();
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
                     Err(e) => response::encode_error(e, &mut rsp_buf),
                 }
-                req_buf.advance(len + body.body_offset());
             }
         }
 

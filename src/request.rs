@@ -1,17 +1,15 @@
-use bytes::BytesMut;
+use bytes::{Buf, BufMut, BytesMut};
 use may::net::TcpStream;
 
 use std::fmt;
-use std::io::{self, Read};
+use std::io::{self, BufRead, Read};
 use std::mem::MaybeUninit;
 
 pub(crate) const MAX_HEADERS: usize = 16;
 
-pub struct BodyReader<'a, 'stream> {
+pub struct BodyReader<'buf, 'stream> {
     // remaining bytes for body
-    body_buf: &'a [u8],
-    // track how many bytes have been read from the body_buf
-    body_offset: usize,
+    req_buf: &'buf mut BytesMut,
     // the max body length limit
     body_limit: usize,
     // total read count
@@ -20,82 +18,58 @@ pub struct BodyReader<'a, 'stream> {
     stream: &'stream mut TcpStream,
 }
 
-impl<'a, 'stream> BodyReader<'a, 'stream> {
-    pub(crate) fn new(stream: &'stream mut TcpStream) -> Self {
-        BodyReader {
-            body_buf: &[],
-            body_offset: 0,
-            body_limit: usize::MAX,
-            total_read: 0,
-            stream,
-        }
-    }
-
-    pub(crate) fn body_offset(&self) -> usize {
-        self.body_offset
-    }
-
+impl<'buf, 'stream> BodyReader<'buf, 'stream> {
     pub fn body_limit(&self) -> usize {
         self.body_limit
     }
-
-    fn set_body_limit(&mut self, body_limit: usize) {
-        self.body_limit = body_limit;
-    }
-
-    fn set_body_buf(&mut self, body_buf: &'a [u8]) {
-        self.body_buf = body_buf;
-        self.body_offset = 0;
-    }
 }
 
-impl<'a, 'stream> Read for BodyReader<'a, 'stream> {
+impl<'buf, 'stream> Read for BodyReader<'buf, 'stream> {
     // the user should control the body reading, don't exceeds the body!
-    // FIXME: deal with partial body
-    // FIXME: deal with next request header
-    // TODO: support chunked encoding
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.total_read >= self.body_limit {
             return Ok(0);
         }
 
-        let body_offset = self.body_offset;
-        let remaining = self.body_buf.len() - body_offset;
-        if remaining > 0 {
-            let n = buf.len().min(remaining);
-            unsafe {
-                buf.as_mut_ptr()
-                    .copy_from_nonoverlapping(self.body_buf.as_ptr().add(body_offset), n)
+        loop {
+            if !buf.is_empty() {
+                let min_len = buf.len().min(self.body_limit - self.total_read);
+                let n = self.req_buf.reader().read(&mut buf[..min_len])?;
+                self.total_read += n;
+                // println!(
+                //     "buf: {}, offset={}",
+                //     std::str::from_utf8(buf).unwrap(),
+                //     self.total_read
+                // );
+                return Ok(n);
             }
-            self.total_read += n;
-            self.body_offset = body_offset + n;
-            // println!(
-            //     "buf: {}, offset={}",
-            //     std::str::from_utf8(buf).unwrap(),
-            //     body_offset + n
-            // );
-            Ok(n)
-        } else {
-            // perform nonblock_read
-            match self.stream.inner_mut().read(buf) {
-                Ok(n) => {
-                    self.total_read += n;
-                    Ok(n)
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(0),
-                Err(e) => Err(e),
-            }
+
+            crate::http_server::reserve_buf(self.req_buf);
+            let read_buf: &mut [u8] = unsafe { std::mem::transmute(self.req_buf.chunk_mut()) };
+            // perform block read from the stream
+            self.total_read += self.stream.read(read_buf)?;
         }
     }
 }
 
-pub struct Request<'a, 'header, 'stream, 'body> {
-    req: httparse::Request<'header, 'a>,
-    len: usize,
-    body: &'body mut BodyReader<'a, 'stream>,
+impl<'buf, 'stream> BufRead for BodyReader<'buf, 'stream> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        Ok(self.req_buf.chunk())
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.req_buf.advance(amt)
+    }
 }
 
-impl<'a, 'header, 'stream, 'body> Request<'a, 'header, 'stream, 'body> {
+pub struct Request<'buf, 'header, 'stream> {
+    req: httparse::Request<'header, 'buf>,
+    len: usize,
+    req_buf: &'buf BytesMut,
+    stream: Option<&'stream mut TcpStream>,
+}
+
+impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
     pub fn method(&self) -> &str {
         self.req.method.unwrap()
     }
@@ -112,14 +86,18 @@ impl<'a, 'header, 'stream, 'body> Request<'a, 'header, 'stream, 'body> {
         self.req.headers
     }
 
-    pub fn body(&mut self) -> &mut BodyReader<'a, 'stream> {
-        self.body.set_body_limit(self.content_length());
-        self.body
-    }
+    pub fn body(mut self) -> BodyReader<'buf, 'stream> {
+        let req_ptr = self.req_buf as *const BytesMut as *mut BytesMut;
+        // safety: the ownership of req_buf is transferred to BodyReader
+        // thus we regain the mutable reference to req_buf
+        let req_buf = unsafe { req_ptr.as_mut().unwrap() };
 
-    #[inline]
-    pub(crate) fn len(&self) -> usize {
-        self.len
+        BodyReader {
+            req_buf,
+            body_limit: self.content_length(),
+            total_read: 0,
+            stream: self.stream.take().unwrap(),
+        }
     }
 
     fn content_length(&self) -> usize {
@@ -137,23 +115,32 @@ impl<'a, 'header, 'stream, 'body> Request<'a, 'header, 'stream, 'body> {
     }
 }
 
-impl<'a, 'header, 'stream, 'body> fmt::Debug for Request<'a, 'header, 'stream, 'body> {
+impl<'buf, 'header, 'stream> Drop for Request<'buf, 'header, 'stream> {
+    fn drop(&mut self) {
+        let req_ptr = self.req_buf as *const BytesMut as *mut BytesMut;
+        // safety: the ownership of req_buf is going to dropped
+        // thus we regain the mutable reference to req_buf
+        let req_buf = unsafe { req_ptr.as_mut().unwrap() };
+        req_buf.advance(self.len);
+    }
+}
+
+impl<'buf, 'header, 'stream> fmt::Debug for Request<'buf, 'header, 'stream> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<HTTP Request {} {}>", self.method(), self.path())
     }
 }
 
-pub fn decode<'a, 'header, 'stream, 'body>(
-    buf: &'a BytesMut,
-    body: &'body mut BodyReader<'a, 'stream>,
-    headers: &'header mut [MaybeUninit<httparse::Header<'a>>; MAX_HEADERS],
-) -> io::Result<Option<Request<'a, 'header, 'stream, 'body>>> {
+pub fn decode<'header, 'buf, 'stream>(
+    headers: &'header mut [MaybeUninit<httparse::Header<'buf>>; MAX_HEADERS],
+    req_buf: &'buf mut BytesMut,
+    stream: &'stream mut TcpStream,
+) -> io::Result<Option<Request<'buf, 'header, 'stream>>> {
     let mut req = httparse::Request::new(&mut []);
-
-    let status = match req.parse_with_uninit_headers(buf, headers) {
+    let status = match req.parse_with_uninit_headers(req_buf, headers) {
         Ok(s) => s,
         Err(e) => {
-            println!("failed to parse http request: {e:?}");
+            eprintln!("failed to parse http request: {e:?}");
             let msg = format!("failed to parse http request: {e:?}");
             return Err(io::Error::new(io::ErrorKind::Other, msg));
         }
@@ -163,9 +150,12 @@ pub fn decode<'a, 'header, 'stream, 'body>(
         httparse::Status::Complete(amt) => amt,
         httparse::Status::Partial => return Ok(None),
     };
-    // println!("req: {:?}", std::str::from_utf8(buf).unwrap());
 
-    body.set_body_buf(&buf[len..]);
-
-    Ok(Some(Request { req, len, body }))
+    // println!("req: {:?}", std::str::from_utf8(req_buf).unwrap());
+    Ok(Some(Request {
+        req,
+        len,
+        req_buf,
+        stream: Some(stream),
+    }))
 }
