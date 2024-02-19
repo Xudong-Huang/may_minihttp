@@ -154,7 +154,10 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
-                    Err(e) => response::encode_error(e, &mut rsp_buf),
+                    Err(e) => {
+                        eprintln!("service err = {:?}", e);
+                        response::encode_error(e, &mut rsp_buf);
+                    }
                 }
             }
         }
@@ -192,7 +195,10 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
-                    Err(e) => response::encode_error(e, &mut rsp_buf),
+                    Err(e) => {
+                        eprintln!("service err = {:?}", e);
+                        response::encode_error(e, &mut rsp_buf);
+                    }
                 }
             }
         }

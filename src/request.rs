@@ -151,7 +151,7 @@ pub fn decode<'header, 'buf, 'stream>(
         httparse::Status::Partial => return Ok(None),
     };
 
-    println!("req: {:?}", std::str::from_utf8(req_buf).unwrap());
+    // println!("req: {:?}", std::str::from_utf8(req_buf).unwrap());
     Ok(Some(Request {
         req,
         len,
