@@ -70,8 +70,8 @@ impl<'buf, 'stream> BufRead for BodyReader<'buf, 'stream> {
 // and the headers buf can be reused
 pub struct Request<'buf, 'header, 'stream> {
     req: httparse::Request<'header, 'buf>,
-    req_buf: Option<&'buf mut BytesMut>,
-    stream: Option<&'stream mut TcpStream>,
+    req_buf: &'buf mut BytesMut,
+    stream: &'stream mut TcpStream,
 }
 
 impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
@@ -91,15 +91,12 @@ impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
         self.req.headers
     }
 
-    pub fn body(mut self) -> BodyReader<'buf, 'stream> {
-        let body_limit = self.content_length();
-        let stream = self.stream.take().unwrap();
-        let req_buf = self.req_buf.take().unwrap();
+    pub fn body(self) -> BodyReader<'buf, 'stream> {
         BodyReader {
-            req_buf,
-            body_limit,
+            body_limit: self.content_length(),
             total_read: 0,
-            stream,
+            stream: self.stream,
+            req_buf: self.req_buf,
         }
     }
 
@@ -148,7 +145,7 @@ pub fn decode<'header, 'buf, 'stream>(
     // println!("req: {:?}", std::str::from_utf8(req_buf).unwrap());
     Ok(Some(Request {
         req,
-        req_buf: Some(req_buf),
-        stream: Some(stream),
+        req_buf,
+        stream,
     }))
 }
