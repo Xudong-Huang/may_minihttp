@@ -109,10 +109,7 @@ impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
         let mut len = usize::MAX;
         for header in self.req.headers.iter() {
             if header.name.eq_ignore_ascii_case("content-length") {
-                len = std::str::from_utf8(header.value)
-                    .unwrap()
-                    .parse()
-                    .unwrap_or(usize::MAX);
+                len = std::str::from_utf8(header.value).unwrap().parse().unwrap();
                 break;
             }
         }
