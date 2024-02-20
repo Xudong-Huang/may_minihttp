@@ -70,7 +70,6 @@ impl<'buf, 'stream> BufRead for BodyReader<'buf, 'stream> {
 // and the headers buf can be reused
 pub struct Request<'buf, 'header, 'stream> {
     req: httparse::Request<'header, 'buf>,
-    len: usize,
     req_buf: Option<&'buf mut BytesMut>,
     stream: Option<&'stream mut TcpStream>,
 }
@@ -96,7 +95,6 @@ impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
         let body_limit = self.content_length();
         let stream = self.stream.take().unwrap();
         let req_buf = self.req_buf.take().unwrap();
-        req_buf.advance(self.len);
         BodyReader {
             req_buf,
             body_limit,
@@ -114,16 +112,6 @@ impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
             }
         }
         len
-    }
-}
-
-impl<'buf, 'header, 'stream> Drop for Request<'buf, 'header, 'stream> {
-    fn drop(&mut self) {
-        // the ownership of req_buf is going to dropped
-        // thus we regain the mutable reference to req_buf
-        if let Some(req_buf) = self.req_buf.take() {
-            req_buf.advance(self.len);
-        }
     }
 }
 
@@ -155,11 +143,11 @@ pub fn decode<'header, 'buf, 'stream>(
         httparse::Status::Complete(amt) => amt,
         httparse::Status::Partial => return Ok(None),
     };
+    req_buf.advance(len);
 
     // println!("req: {:?}", std::str::from_utf8(req_buf).unwrap());
     Ok(Some(Request {
         req,
-        len,
         req_buf: Some(req_buf),
         stream: Some(stream),
     }))
