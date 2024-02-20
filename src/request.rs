@@ -62,10 +62,14 @@ impl<'buf, 'stream> BufRead for BodyReader<'buf, 'stream> {
     }
 }
 
+// we should hold the mut ref of req_buf
+// before into body, this req_buf is only for holding headers
+// after into body, this req_buf is mutable to read extra body bytes
+// and the headers buf can be reused
 pub struct Request<'buf, 'header, 'stream> {
     req: httparse::Request<'header, 'buf>,
     len: usize,
-    req_buf: &'buf BytesMut,
+    req_buf: Option<&'buf mut BytesMut>,
     stream: Option<&'stream mut TcpStream>,
 }
 
@@ -87,16 +91,15 @@ impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
     }
 
     pub fn body(mut self) -> BodyReader<'buf, 'stream> {
-        let req_ptr = self.req_buf as *const BytesMut as *mut BytesMut;
-        // safety: the ownership of req_buf is transferred to BodyReader
-        // thus we regain the mutable reference to req_buf
-        let req_buf = unsafe { req_ptr.as_mut().unwrap() };
-
+        let body_limit = self.content_length();
+        let stream = self.stream.take().unwrap();
+        let req_buf = self.req_buf.take().unwrap();
+        req_buf.advance(self.len);
         BodyReader {
             req_buf,
-            body_limit: self.content_length(),
+            body_limit,
             total_read: 0,
-            stream: self.stream.take().unwrap(),
+            stream,
         }
     }
 
@@ -117,11 +120,11 @@ impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
 
 impl<'buf, 'header, 'stream> Drop for Request<'buf, 'header, 'stream> {
     fn drop(&mut self) {
-        let req_ptr = self.req_buf as *const BytesMut as *mut BytesMut;
-        // safety: the ownership of req_buf is going to dropped
+        // the ownership of req_buf is going to dropped
         // thus we regain the mutable reference to req_buf
-        let req_buf = unsafe { req_ptr.as_mut().unwrap() };
-        req_buf.advance(self.len);
+        if let Some(req_buf) = self.req_buf.take() {
+            req_buf.advance(self.len);
+        }
     }
 }
 
@@ -137,7 +140,10 @@ pub fn decode<'header, 'buf, 'stream>(
     stream: &'stream mut TcpStream,
 ) -> io::Result<Option<Request<'buf, 'header, 'stream>>> {
     let mut req = httparse::Request::new(&mut []);
-    let status = match req.parse_with_uninit_headers(req_buf, headers) {
+    // safety: don't hold the reference of req_buf
+    // so we can transfer the mutable reference to Request
+    let buf: &[u8] = unsafe { std::mem::transmute(req_buf.chunk()) };
+    let status = match req.parse_with_uninit_headers(buf, headers) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("failed to parse http request: {e:?}");
@@ -155,7 +161,7 @@ pub fn decode<'header, 'buf, 'stream>(
     Ok(Some(Request {
         req,
         len,
-        req_buf,
+        req_buf: Some(req_buf),
         stream: Some(stream),
     }))
 }
