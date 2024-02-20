@@ -47,7 +47,9 @@ impl<'buf, 'stream> Read for BodyReader<'buf, 'stream> {
             crate::http_server::reserve_buf(self.req_buf);
             let read_buf: &mut [u8] = unsafe { std::mem::transmute(self.req_buf.chunk_mut()) };
             // perform block read from the stream
-            self.total_read += self.stream.read(read_buf)?;
+            let n = self.stream.read(read_buf)?;
+            self.total_read += n;
+            unsafe { self.req_buf.advance_mut(n) };
         }
     }
 }
