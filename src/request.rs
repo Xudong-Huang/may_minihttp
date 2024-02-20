@@ -32,7 +32,7 @@ impl<'buf, 'stream> Read for BodyReader<'buf, 'stream> {
         }
 
         loop {
-            if !buf.is_empty() {
+            if !self.req_buf.is_empty() {
                 let min_len = buf.len().min(self.body_limit - self.total_read);
                 let n = self.req_buf.reader().read(&mut buf[..min_len])?;
                 self.total_read += n;
