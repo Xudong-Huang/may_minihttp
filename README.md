@@ -14,7 +14,7 @@ First, add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-may_minihttp = { git = "https://github.com/Xudong-Huang/may_minihttp.git" }
+may_minihttp = "0.1"
 ```
 
 Then just simply implement your http service
