@@ -1,11 +1,11 @@
-use bytes::{Buf, BufMut, BytesMut};
-use may::net::TcpStream;
-
 use std::fmt;
 use std::io::{self, BufRead, Read};
 use std::mem::MaybeUninit;
 
 pub(crate) const MAX_HEADERS: usize = 16;
+
+use bytes::{Buf, BufMut, BytesMut};
+use may::net::TcpStream;
 
 pub struct BodyReader<'buf, 'stream> {
     // remaining bytes for body

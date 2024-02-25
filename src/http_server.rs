@@ -6,6 +6,7 @@ use std::net::ToSocketAddrs;
 
 use crate::request::{self, Request};
 use crate::response::{self, Response};
+
 #[cfg(unix)]
 use bytes::Buf;
 use bytes::{BufMut, BytesMut};

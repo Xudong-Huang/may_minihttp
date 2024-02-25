@@ -1,9 +1,8 @@
-use bytes::BytesMut;
+use std::io;
 
 use crate::request::MAX_HEADERS;
 
-use std::io;
-
+use bytes::BytesMut;
 pub struct Response<'a> {
     headers: [&'static str; MAX_HEADERS],
     headers_len: usize,
@@ -99,7 +98,7 @@ impl<'a> Response<'a> {
 
 impl<'a> Drop for Response<'a> {
     fn drop(&mut self) {
-        unsafe { self.rsp_buf.set_len(0) };
+        self.rsp_buf.clear();
     }
 }
 
