@@ -1,4 +1,5 @@
-use may_minihttp::{BodyWriter, HttpServer, HttpService, Request, Response};
+use bytes::BufMut;
+use may_minihttp::{HttpServer, HttpService, Request, Response};
 
 #[derive(Clone)]
 struct HelloJson;
@@ -12,7 +13,7 @@ impl HttpService for HelloJson {
         let value: serde_json::Value = serde_json::from_reader(body)?;
         println!("value: {:?}", value);
         rsp.header("Content-Type: application/json");
-        let w = BodyWriter(rsp.body_mut());
+        let w = rsp.body_mut().writer();
         if value
             .as_object()
             .unwrap()

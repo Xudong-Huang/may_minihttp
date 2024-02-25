@@ -103,7 +103,7 @@ impl<'a> Drop for Response<'a> {
     }
 }
 
-pub fn encode(mut rsp: Response, buf: &mut BytesMut) {
+pub(crate) fn encode(mut rsp: Response, buf: &mut BytesMut) {
     if rsp.status_message.code == 200 {
         buf.extend_from_slice(b"HTTP/1.1 200 Ok\r\nServer: M\r\nDate: ");
     } else {
@@ -130,7 +130,7 @@ pub fn encode(mut rsp: Response, buf: &mut BytesMut) {
     buf.extend_from_slice(rsp.get_body());
 }
 
-pub fn encode_error(e: io::Error, buf: &mut BytesMut) {
+pub(crate) fn encode_error(e: io::Error, buf: &mut BytesMut) {
     error!("error in service: err = {:?}", e);
     let msg_string = e.to_string();
     let msg = msg_string.as_bytes();
@@ -143,19 +143,4 @@ pub fn encode_error(e: io::Error, buf: &mut BytesMut) {
 
     buf.extend_from_slice(b"\r\n\r\n");
     buf.extend_from_slice(msg);
-}
-
-// impl io::Write for the response body
-pub struct BodyWriter<'a>(pub &'a mut BytesMut);
-
-impl<'a> io::Write for BodyWriter<'a> {
-    #[inline]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
 }
