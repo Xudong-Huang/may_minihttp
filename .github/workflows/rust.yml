@@ -14,8 +14,15 @@ env:
 
 jobs:
   lints:
-    name: Run cargo fmt and cargo clippy
-    runs-on: ubuntu-latest
+    name: Run cargo fmt and cargo clippy ${{ matrix.rust }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        rust:
+          - stable
+        os:
+          - ubuntu-latest
+          - windows-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -40,30 +47,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --no-default-features -- -D warnings
-  test:
-    name: Test ${{ matrix.rust }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        rust:
-          - stable
-          - nightly
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macOS-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-      - name: Install Rust (${{ matrix.rust }})
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-      - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --examples
+          args: --examples -- -D warnings
