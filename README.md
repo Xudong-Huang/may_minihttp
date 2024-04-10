@@ -5,7 +5,7 @@ Mini http server that implemented on top of [may](https://github.com/Xudong-Huan
 This crate is ported from [tokio_minihttp](https://github.com/tokio-rs/tokio-minihttp).
 But with much ease of use, you can call `MAY` block APIs directly in your service.
 
-[![Build Status](https://travis-ci.org/Xudong-Huang/may_minihttp.svg?branch=master)](https://travis-ci.org/Xudong-Huang/may_minihttp)
+[![Build Status](https://github.com/Xudong-Huang/may_minihttp/workflows/CI/badge.svg)](https://github.com/Xudong-Huang/may_minihttp/actions?query=workflow%3ACI+branch%3Amaster)
 [![Crate](https://img.shields.io/crates/v/may_minihttp.svg)](https://crates.io/crates/may_minihttp)
 
 ## Usage
