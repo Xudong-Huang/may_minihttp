@@ -1,3 +1,8 @@
+// How to run this example:
+// ```sh
+// docker run -d --rm -p 5432:5432 techempower/tfb.database.postgres:latest
+// cargo run --release --no-default-features --example techempower
+// ```
 fn main() {
     __impl::main();
 }
