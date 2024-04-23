@@ -67,7 +67,7 @@ mod __impl {
     impl PgConnectionPool {
         fn new(db_url: &'static str, size: usize) -> PgConnectionPool {
             let clients = (0..size)
-                .map(|_| may::go!(move || PgConnection::new(db_url)))
+                .map(|_| std::thread::spawn(move || PgConnection::new(db_url)))
                 .collect::<Vec<_>>();
             let mut clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
             clients.sort_by(|a, b| (a.client.id() % size).cmp(&(b.client.id() % size)));
