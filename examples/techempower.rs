@@ -62,7 +62,7 @@ mod __impl {
     impl PgConnectionPool {
         fn new(db_url: &'static str, size: usize) -> PgConnectionPool {
             let clients = (0..size)
-                .map(|_| std::thread::spawn(move || PgConnection::new(db_url)))
+                .map(|_| may::go!(move || PgConnection::new(db_url)))
                 .collect::<Vec<_>>();
             let mut clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
             clients.sort_by(|a, b| (a.client.id() % size).cmp(&(b.client.id() % size)));
@@ -128,7 +128,7 @@ mod __impl {
         fn get_world(&self, random_id: i32) -> Result<WorldRow, may_postgres::Error> {
             let mut q = self
                 .client
-                .query_raw(&self.statement.world, &[&random_id as _])?;
+                .query_raw(&self.statement.world, &[&random_id])?;
             match q.next().transpose()? {
                 Some(row) => Ok(WorldRow {
                     id: row.get(0),
@@ -148,7 +148,7 @@ mod __impl {
                 let random_id = (rand.generate::<u32>() % 10_000 + 1) as i32;
                 queries.push(
                     self.client
-                        .query_raw(&self.statement.world, &[&random_id as _])?,
+                        .query_raw(&self.statement.world, &[&random_id])?,
                 );
             }
 
@@ -175,7 +175,7 @@ mod __impl {
                 let random_id = (rand.generate::<u32>() % 10_000 + 1) as i32;
                 queries.push(
                     self.client
-                        .query_raw(&self.statement.world, &[&random_id as _])?,
+                        .query_raw(&self.statement.world, &[&random_id])?,
                 );
             }
 
@@ -211,7 +211,7 @@ mod __impl {
             let rows = self.client.query_raw(&self.statement.fortune, &[])?;
 
             let all_rows = Vec::from_iter(rows.map(|r| r.unwrap()));
-            let mut fortunes = Vec::with_capacity(all_rows.capacity() + 1);
+            let mut fortunes = Vec::with_capacity(all_rows.len() + 1);
             fortunes.extend(all_rows.iter().map(|r| Fortune {
                 id: r.get(0),
                 message: r.get(1),
@@ -222,9 +222,9 @@ mod __impl {
             });
             fortunes.sort_by(|it, next| it.message.cmp(next.message));
 
-            let mut body = std::mem::replace(buf, BytesMut::new());
+            let mut body = unsafe { std::ptr::read(buf) };
             ywrite_html!(body, "{{> fortune }}");
-            let _ = std::mem::replace(buf, body);
+            unsafe { std::ptr::write(buf, body) };
             Ok(())
         }
     }

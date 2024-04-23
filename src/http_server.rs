@@ -115,9 +115,9 @@ fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Resu
 const BUF_LEN: usize = 4096 * 8;
 #[inline]
 pub(crate) fn reserve_buf(buf: &mut BytesMut) {
-    let capacity = buf.capacity();
-    if capacity < 1024 {
-        buf.reserve(BUF_LEN - capacity);
+    let rem = buf.capacity() - buf.len();
+    if rem < 1024 {
+        buf.reserve(BUF_LEN - rem);
     }
 }
 
