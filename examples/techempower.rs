@@ -65,7 +65,8 @@ mod __impl {
     }
 
     impl PgConnectionPool {
-        fn new(db_url: &'static str, size: usize) -> PgConnectionPool {
+        fn new(db_url: &'static str) -> PgConnectionPool {
+            let size = num_cpus::get();
             let clients = (0..size)
                 .map(|_| std::thread::spawn(move || PgConnection::new(db_url)))
                 .collect::<Vec<_>>();
@@ -300,13 +301,13 @@ mod __impl {
 
     pub fn main() {
         may::config().set_pool_capacity(1000).set_stack_size(0x1000);
-        println!("Starting http server: 127.0.0.1:8081");
+
+        let connect_str = "postgres://benchmarkdbuser:benchmarkdbpass@tfb-database/hello_world";
         let server = HttpServer {
-            db_pool: PgConnectionPool::new(
-                "postgres://benchmarkdbuser:benchmarkdbpass@tfb-database/hello_world",
-                num_cpus::get(),
-            ),
+            db_pool: PgConnectionPool::new(connect_str),
         };
+
+        println!("Starting http server: 127.0.0.1:8081");
         server.start("0.0.0.0:8081").unwrap().join().unwrap();
     }
 }
