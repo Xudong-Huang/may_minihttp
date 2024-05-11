@@ -130,7 +130,7 @@ pub struct HttpServer<T>(pub T);
 fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) -> io::Result<()> {
     let mut req_buf = BytesMut::with_capacity(BUF_LEN);
     let mut rsp_buf = BytesMut::with_capacity(BUF_LEN);
-    let mut body_buf = BytesMut::with_capacity(BUF_LEN);
+    let mut body_buf = BytesMut::with_capacity(4096);
 
     loop {
         stream.reset_io();
@@ -141,13 +141,13 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests
         if read_cnt > 0 {
-            reserve_buf(&mut rsp_buf);
             loop {
                 let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
                 let req = match request::decode(&mut headers, &mut req_buf, stream)? {
                     Some(req) => req,
                     None => break,
                 };
+                reserve_buf(&mut rsp_buf);
                 let mut rsp = Response::new(&mut body_buf);
                 match service.call(req, &mut rsp) {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
