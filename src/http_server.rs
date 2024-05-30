@@ -135,6 +135,9 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
     loop {
         stream.reset_io();
 
+        // write out the responses
+        let write_cnt = nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
+
         // read the socket for requests
         reserve_buf(&mut req_buf);
         let read_cnt = nonblock_read(stream.inner_mut(), &mut req_buf)?;
@@ -158,9 +161,6 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                 }
             }
         }
-
-        // write out the responses
-        let write_cnt = nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
 
         if read_cnt == 0 && (rsp_buf.is_empty() || write_cnt == 0) {
             stream.wait_io();
