@@ -76,40 +76,43 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
 #[cfg(unix)]
 #[inline]
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
+    let read_buf: &mut [u8] = unsafe { std::mem::transmute(req_buf.chunk_mut()) };
+    assert_ne!(read_buf.len(), 0, "read_buf.len() == 0");
+
     let mut read_cnt = 0;
     loop {
-        let read_buf: &mut [u8] = unsafe { std::mem::transmute(req_buf.chunk_mut()) };
-        match stream.read(read_buf) {
-            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
-            Ok(n) => {
-                read_cnt += n;
-                unsafe { req_buf.advance_mut(n) };
-            }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(read_cnt),
+        match stream.read(unsafe { read_buf.get_unchecked_mut(read_cnt..) }) {
+            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "read closed")),
+            Ok(n) => read_cnt += n,
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
             Err(err) => return Err(err),
         }
     }
+
+    unsafe { req_buf.advance_mut(read_cnt) };
+    Ok(read_cnt)
 }
 
 #[cfg(unix)]
 #[inline]
-fn nonblock_write(stream: &mut impl Write, write_buf: &mut BytesMut) -> io::Result<usize> {
+fn nonblock_write(stream: &mut impl Write, rsp_buf: &mut BytesMut) -> io::Result<usize> {
+    let write_buf = rsp_buf.chunk();
     let len = write_buf.len();
     if len == 0 {
         return Ok(0);
     }
 
-    let mut written = 0;
-    while written < len {
-        match stream.write(unsafe { write_buf.get_unchecked(written..) }) {
-            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
-            Ok(n) => written += n,
+    let mut write_cnt = 0;
+    while write_cnt < len {
+        match stream.write(unsafe { write_buf.get_unchecked(write_cnt..) }) {
+            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "write closed")),
+            Ok(n) => write_cnt += n,
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
             Err(err) => return Err(err),
         }
     }
-    write_buf.advance(written);
-    Ok(written)
+    rsp_buf.advance(write_cnt);
+    Ok(write_cnt)
 }
 
 const BUF_LEN: usize = 4096 * 8;
@@ -159,6 +162,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                         response::encode_error(e, &mut rsp_buf);
                     }
                 }
+                // nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
             }
         }
 
