@@ -73,19 +73,39 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
     }
 }
 
+#[inline]
 #[cold]
 pub(crate) fn err<T>(e: io::Error) -> io::Result<T> {
     Err(e)
 }
 
+#[inline]
+#[cold]
+fn cold() {}
+
+// #[inline]
+// fn likely(b: bool) -> bool {
+//     if !b { cold() }
+//     b
+// }
+
+#[inline]
+fn unlikely(b: bool) -> bool {
+    if b {
+        cold()
+    }
+    b
+}
+
 #[cfg(unix)]
 #[inline]
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
+    reserve_buf(req_buf);
     let read_buf: &mut [u8] = unsafe { std::mem::transmute(req_buf.chunk_mut()) };
-    assert_ne!(read_buf.len(), 0, "read_buf.len() == 0");
+    let len = read_buf.len();
 
     let mut read_cnt = 0;
-    loop {
+    while read_cnt < len {
         match stream.read(unsafe { read_buf.get_unchecked_mut(read_cnt..) }) {
             Ok(0) => return err(io::Error::new(io::ErrorKind::BrokenPipe, "read closed")),
             Ok(n) => read_cnt += n,
@@ -103,7 +123,7 @@ fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<u
 fn nonblock_write(stream: &mut impl Write, rsp_buf: &mut BytesMut) -> io::Result<usize> {
     let write_buf = rsp_buf.chunk();
     let len = write_buf.len();
-    if len == 0 {
+    if unlikely(len == 0) {
         return Ok(0);
     }
 
@@ -147,7 +167,6 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
         let write_cnt = nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
 
         // read the socket for requests
-        reserve_buf(&mut req_buf);
         let read_cnt = nonblock_read(stream.inner_mut(), &mut req_buf)?;
 
         // prepare the requests
@@ -167,6 +186,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
                         response::encode_error(e, &mut rsp_buf);
                     }
                 }
+                // here need to use no_delay tcp option
                 // nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
             }
         }
