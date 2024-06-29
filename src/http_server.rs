@@ -207,7 +207,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
         reserve_buf(&mut req_buf);
         let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
         let read_cnt = stream.read(read_buf)?;
-        if read_cnt == 0 {
+        if unlikely(read_cnt == 0) {
             //connection was closed
             return err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
         }
