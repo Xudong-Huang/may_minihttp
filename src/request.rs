@@ -7,6 +7,8 @@ pub(crate) const MAX_HEADERS: usize = 16;
 use bytes::{Buf, BufMut, BytesMut};
 use may::net::TcpStream;
 
+use crate::http_server::err;
+
 pub struct BodyReader<'buf, 'stream> {
     // remaining bytes for body
     req_buf: &'buf mut BytesMut,
@@ -130,9 +132,9 @@ pub fn decode<'header, 'buf, 'stream>(
     let status = match req.parse_with_uninit_headers(buf, headers) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("failed to parse http request: {e:?}");
             let msg = format!("failed to parse http request: {e:?}");
-            return Err(io::Error::new(io::ErrorKind::Other, msg));
+            eprintln!("{msg}");
+            return err(io::Error::new(io::ErrorKind::Other, msg));
         }
     };
 

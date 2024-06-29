@@ -73,6 +73,11 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
     }
 }
 
+#[cold]
+pub(crate) fn err<T>(e: io::Error) -> io::Result<T> {
+    Err(e)
+}
+
 #[cfg(unix)]
 #[inline]
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
@@ -82,10 +87,10 @@ fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<u
     let mut read_cnt = 0;
     loop {
         match stream.read(unsafe { read_buf.get_unchecked_mut(read_cnt..) }) {
-            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "read closed")),
+            Ok(0) => return err(io::Error::new(io::ErrorKind::BrokenPipe, "read closed")),
             Ok(n) => read_cnt += n,
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-            Err(err) => return Err(err),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+            Err(e) => return err(e),
         }
     }
 
@@ -105,10 +110,10 @@ fn nonblock_write(stream: &mut impl Write, rsp_buf: &mut BytesMut) -> io::Result
     let mut write_cnt = 0;
     while write_cnt < len {
         match stream.write(unsafe { write_buf.get_unchecked(write_cnt..) }) {
-            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "write closed")),
+            Ok(0) => return err(io::Error::new(io::ErrorKind::BrokenPipe, "write closed")),
             Ok(n) => write_cnt += n,
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-            Err(err) => return Err(err),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+            Err(e) => return err(e),
         }
     }
     rsp_buf.advance(write_cnt);
@@ -184,7 +189,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
         let read_cnt = stream.read(read_buf)?;
         if read_cnt == 0 {
             //connection was closed
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
+            return err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
         }
         unsafe { req_buf.advance_mut(read_cnt) };
 
