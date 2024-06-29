@@ -1,6 +1,6 @@
 [package]
 name = "may_minihttp"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 authors = ["Xudong Huang <huangxu008@hotmail.com>"]
 repository = "https://github.com/Xudong-Huang/may_minihttp.git"
