@@ -79,24 +79,6 @@ pub(crate) fn err<T>(e: io::Error) -> io::Result<T> {
     Err(e)
 }
 
-#[inline]
-#[cold]
-fn cold() {}
-
-// #[inline]
-// fn likely(b: bool) -> bool {
-//     if !b { cold() }
-//     b
-// }
-
-#[inline]
-fn unlikely(b: bool) -> bool {
-    if b {
-        cold()
-    }
-    b
-}
-
 #[cfg(unix)]
 #[inline]
 fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
@@ -123,10 +105,6 @@ fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<u
 fn nonblock_write(stream: &mut impl Write, rsp_buf: &mut BytesMut) -> io::Result<usize> {
     let write_buf = rsp_buf.chunk();
     let len = write_buf.len();
-    if unlikely(len == 0) {
-        return Ok(0);
-    }
-
     let mut write_cnt = 0;
     while write_cnt < len {
         match stream.write(unsafe { write_buf.get_unchecked(write_cnt..) }) {
@@ -207,7 +185,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
         reserve_buf(&mut req_buf);
         let read_buf: &mut [u8] = unsafe { std::mem::transmute(&mut *req_buf.chunk_mut()) };
         let read_cnt = stream.read(read_buf)?;
-        if unlikely(read_cnt == 0) {
+        if read_cnt == 0 {
             //connection was closed
             return err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"));
         }
