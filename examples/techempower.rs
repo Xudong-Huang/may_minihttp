@@ -68,16 +68,20 @@ mod __impl {
         fn new(db_url: &'static str) -> PgConnectionPool {
             let size = num_cpus::get();
             let clients = (0..size)
-                .map(|_| std::thread::spawn(move || PgConnection::new(db_url)))
+                .map(|_| may::go!(move || PgConnection::new(db_url)))
                 .collect::<Vec<_>>();
             let mut clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
             clients.sort_by(|a, b| (a.client.id() % size).cmp(&(b.client.id() % size)));
+            // for c in &clients {
+            //     println!("client id: {}", c.client.id());
+            // }
             PgConnectionPool { clients }
         }
 
         fn get_connection(&self, id: usize) -> PgConnection {
             let len = self.clients.len();
             let connection = &self.clients[id % len];
+            assert_eq!(connection.client.id() % len, id % len);
             PgConnection {
                 client: connection.client.clone(),
                 statement: connection.statement.clone(),
