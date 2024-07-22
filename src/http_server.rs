@@ -81,7 +81,7 @@ pub(crate) fn err<T>(e: io::Error) -> io::Result<T> {
 
 #[cfg(unix)]
 #[inline]
-fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<usize> {
+fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<(usize, bool)> {
     reserve_buf(req_buf);
     let read_buf: &mut [u8] = unsafe { std::mem::transmute(req_buf.chunk_mut()) };
     let len = read_buf.len();
@@ -97,7 +97,7 @@ fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<u
     }
 
     unsafe { req_buf.advance_mut(read_cnt) };
-    Ok(read_cnt)
+    Ok((read_cnt, read_cnt < len))
 }
 
 #[cfg(unix)]
@@ -141,13 +141,8 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
     loop {
         stream.reset_io();
 
-        // write out the responses
-        let write_cnt = nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
-
-        // read the socket for requests
-        let read_cnt = nonblock_read(stream.inner_mut(), &mut req_buf)?;
-
-        // prepare the requests
+        let (read_cnt, read_blocked) = nonblock_read(stream.inner_mut(), &mut req_buf)?;
+        // prepare the requests, we should make sure the request is fully read
         if read_cnt > 0 {
             loop {
                 let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
@@ -169,7 +164,10 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
             }
         }
 
-        if read_cnt == 0 && (rsp_buf.is_empty() || write_cnt == 0) {
+        // write out the responses
+        nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
+
+        if read_blocked {
             stream.wait_io();
         }
     }
