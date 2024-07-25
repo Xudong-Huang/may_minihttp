@@ -81,7 +81,7 @@ pub(crate) fn err<T>(e: io::Error) -> io::Result<T> {
 
 #[cfg(unix)]
 #[inline]
-fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<(usize, bool)> {
+fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<bool> {
     reserve_buf(req_buf);
     let read_buf: &mut [u8] = unsafe { std::mem::transmute(req_buf.chunk_mut()) };
     let len = read_buf.len();
@@ -97,7 +97,7 @@ fn nonblock_read(stream: &mut impl Read, req_buf: &mut BytesMut) -> io::Result<(
     }
 
     unsafe { req_buf.advance_mut(read_cnt) };
-    Ok((read_cnt, read_cnt < len))
+    Ok(read_cnt < len)
 }
 
 #[cfg(unix)]
@@ -139,29 +139,26 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
     let mut body_buf = BytesMut::with_capacity(4096);
 
     loop {
-        stream.reset_io();
+        let read_blocked = nonblock_read(stream.inner_mut(), &mut req_buf)?;
 
-        let (read_cnt, read_blocked) = nonblock_read(stream.inner_mut(), &mut req_buf)?;
         // prepare the requests, we should make sure the request is fully read
-        if read_cnt > 0 {
-            loop {
-                let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
-                let req = match request::decode(&mut headers, &mut req_buf, stream)? {
-                    Some(req) => req,
-                    None => break,
-                };
-                reserve_buf(&mut rsp_buf);
-                let mut rsp = Response::new(&mut body_buf);
-                match service.call(req, &mut rsp) {
-                    Ok(()) => response::encode(rsp, &mut rsp_buf),
-                    Err(e) => {
-                        eprintln!("service err = {:?}", e);
-                        response::encode_error(e, &mut rsp_buf);
-                    }
+        loop {
+            let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
+            let req = match request::decode(&mut headers, &mut req_buf, stream)? {
+                Some(req) => req,
+                None => break,
+            };
+            reserve_buf(&mut rsp_buf);
+            let mut rsp = Response::new(&mut body_buf);
+            match service.call(req, &mut rsp) {
+                Ok(()) => response::encode(rsp, &mut rsp_buf),
+                Err(e) => {
+                    eprintln!("service err = {:?}", e);
+                    response::encode_error(e, &mut rsp_buf);
                 }
-                // here need to use no_delay tcp option
-                // nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
             }
+            // here need to use no_delay tcp option
+            // nonblock_write(stream.inner_mut(), &mut rsp_buf)?;
         }
 
         // write out the responses

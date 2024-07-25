@@ -37,9 +37,7 @@ mimalloc = { version = "0.1", default-features = false }
 nanorand = { version = "0.7", default-features = false, features = ["std", "wyrand"] }
 
 [target.'cfg(unix)'.dev-dependencies]
-# may_postgres = { git = "https://github.com/Xudong-Huang/may_postgres.git", default-features = false }
-may_postgres = { path = "../may_postgres", default-features = false }
-
+may_postgres = { git = "https://github.com/Xudong-Huang/may_postgres.git", default-features = false }
 
 [features]
 default = ["may/default"]
@@ -53,5 +51,5 @@ debug = false
 incremental = false
 overflow-checks = false
 
-[patch.crates-io]
-may = { path = "../may" }
+# [patch.crates-io]
+# may = { path = "../may" }
