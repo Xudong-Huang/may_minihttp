@@ -1,6 +1,6 @@
 [package]
 name = "may_minihttp"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 authors = ["Xudong Huang <huangxu008@hotmail.com>"]
 repository = "https://github.com/Xudong-Huang/may_minihttp.git"
@@ -20,7 +20,7 @@ httpdate = "1"
 httparse = "1"
 once_cell = "1"
 
-may = { version = "0.3", default-features = false }
+may = { version = "0.3.46", default-features = false }
 
 [dev-dependencies]
 atoi = "2"
