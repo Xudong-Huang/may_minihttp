@@ -23,7 +23,7 @@ struct StatusMessage {
 }
 
 impl<'a> Response<'a> {
-    pub(crate) fn new(rsp_buf: &'a mut BytesMut) -> Response {
+    pub(crate) fn new(rsp_buf: &'a mut BytesMut) -> Response<'a> {
         let headers: [&'static str; 16] = [""; 16];
 
         Response {
