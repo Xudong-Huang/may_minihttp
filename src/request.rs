@@ -46,11 +46,6 @@ impl<'buf, 'stream> Read for BodyReader<'buf, 'stream> {
                 let min_len = buf.len().min(self.body_limit - self.total_read);
                 let n = self.req_buf.reader().read(&mut buf[..min_len])?;
                 self.total_read += n;
-                println!(
-                    "buf: {}, offset={}",
-                    std::str::from_utf8(buf).unwrap(),
-                    self.total_read
-                );
                 return Ok(n);
             }
 
