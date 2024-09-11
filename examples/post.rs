@@ -12,21 +12,17 @@ impl HttpService for HelloJson {
         println!("method: {:?}", method);
         let mut body = req.body();
         println!("body_limit: {:?}", body.body_limit());
-        let mut str = String::new();
-        body.read_line(&mut str)?;
-        let value: serde_json::Value = serde_json::from_str(&str)?;
+        let value: serde_json::Value = serde_json::from_slice(body.fill_buf()?)?;
         println!("value: {:?}", value);
         rsp.header("Content-Type: application/json");
         let w = rsp.body_mut().writer();
-        if value
-            .as_object()
-            .unwrap()
-            .get("token")
-            .unwrap()
-            .as_str()
-            .unwrap()
-            == "LOmCXi7MkpRozLJvLrK6fA=="
-        {
+
+        fn get_token(value: &serde_json::Value) -> Option<&str> {
+            value.as_object()?.get("token")?.as_str()
+        }
+        let token = get_token(&value).ok_or(std::io::ErrorKind::InvalidData)?;
+
+        if token == "LOmCXi7MkpRozLJvLrK6fA==" {
             serde_json::to_writer(w, &serde_json::json!({ "status": "ok" }))?;
         } else {
             serde_json::to_writer(w, &serde_json::json!({ "status": "denied" }))?;
