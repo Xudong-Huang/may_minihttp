@@ -11,7 +11,6 @@ impl HttpService for HelloJson {
         let method = req.method();
         println!("method: {:?}", method);
         let mut body = req.body();
-        println!("body_limit: {:?}", body.body_limit());
         let value: serde_json::Value = serde_json::from_slice(body.fill_buf()?)?;
         println!("value: {:?}", value);
         rsp.header("Content-Type: application/json");

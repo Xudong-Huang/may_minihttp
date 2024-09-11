@@ -21,10 +21,6 @@ pub struct BodyReader<'buf, 'stream> {
 }
 
 impl<'buf, 'stream> BodyReader<'buf, 'stream> {
-    pub fn body_limit(&self) -> usize {
-        self.body_limit
-    }
-
     fn read_more_data(&mut self) -> io::Result<usize> {
         crate::http_server::reserve_buf(self.req_buf);
         let read_buf: &mut [u8] = unsafe { std::mem::transmute(self.req_buf.chunk_mut()) };
