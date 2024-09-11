@@ -127,7 +127,7 @@ impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
     }
 
     fn content_length(&self) -> usize {
-        let mut len = usize::MAX;
+        let mut len = 0;
         for header in self.req.headers.iter() {
             if header.name.eq_ignore_ascii_case("content-length") {
                 len = std::str::from_utf8(header.value).unwrap().parse().unwrap();
