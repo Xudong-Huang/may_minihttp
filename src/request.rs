@@ -24,6 +24,14 @@ impl<'buf, 'stream> BodyReader<'buf, 'stream> {
     pub fn body_limit(&self) -> usize {
         self.body_limit
     }
+
+    fn read_more_data(&mut self) -> io::Result<usize> {
+        crate::http_server::reserve_buf(self.req_buf);
+        let read_buf: &mut [u8] = unsafe { std::mem::transmute(self.req_buf.chunk_mut()) };
+        let n = self.stream.read(read_buf)?;
+        unsafe { self.req_buf.advance_mut(n) };
+        Ok(n)
+    }
 }
 
 impl<'buf, 'stream> Read for BodyReader<'buf, 'stream> {
@@ -38,30 +46,52 @@ impl<'buf, 'stream> Read for BodyReader<'buf, 'stream> {
                 let min_len = buf.len().min(self.body_limit - self.total_read);
                 let n = self.req_buf.reader().read(&mut buf[..min_len])?;
                 self.total_read += n;
-                // println!(
-                //     "buf: {}, offset={}",
-                //     std::str::from_utf8(buf).unwrap(),
-                //     self.total_read
-                // );
+                println!(
+                    "buf: {}, offset={}",
+                    std::str::from_utf8(buf).unwrap(),
+                    self.total_read
+                );
                 return Ok(n);
             }
 
-            crate::http_server::reserve_buf(self.req_buf);
-            let read_buf: &mut [u8] = unsafe { std::mem::transmute(self.req_buf.chunk_mut()) };
-            // perform block read from the stream
-            let n = self.stream.read(read_buf)?;
-            unsafe { self.req_buf.advance_mut(n) };
+            if self.read_more_data()? == 0 {
+                return Ok(0);
+            }
         }
     }
 }
 
 impl<'buf, 'stream> BufRead for BodyReader<'buf, 'stream> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        Ok(self.req_buf.chunk())
+        let remain = self.body_limit - self.total_read;
+        if remain == 0 {
+            return Ok(&[]);
+        }
+        if self.req_buf.is_empty() {
+            self.read_more_data()?;
+        }
+        let n = self.req_buf.len().min(remain);
+        Ok(&self.req_buf.chunk()[0..n])
     }
 
     fn consume(&mut self, amt: usize) {
+        assert!(amt <= self.body_limit - self.total_read);
+        assert!(amt <= self.req_buf.len());
+        self.total_read += amt;
         self.req_buf.advance(amt)
+    }
+}
+
+impl<'buf, 'stream> Drop for BodyReader<'buf, 'stream> {
+    fn drop(&mut self) {
+        // consume all the remaining bytes
+        while let Ok(n) = self.fill_buf().map(|b| b.len()) {
+            if n == 0 {
+                break;
+            }
+            // println!("drop: {:?}", n);
+            self.consume(n);
+        }
     }
 }
 
