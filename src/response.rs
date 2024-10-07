@@ -96,7 +96,7 @@ impl<'a> Response<'a> {
     }
 }
 
-impl<'a> Drop for Response<'a> {
+impl Drop for Response<'_> {
     fn drop(&mut self) {
         self.rsp_buf.clear();
     }

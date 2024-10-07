@@ -20,7 +20,7 @@ pub struct BodyReader<'buf, 'stream> {
     stream: &'stream mut TcpStream,
 }
 
-impl<'buf, 'stream> BodyReader<'buf, 'stream> {
+impl BodyReader<'_, '_> {
     fn read_more_data(&mut self) -> io::Result<usize> {
         crate::http_server::reserve_buf(self.req_buf);
         let read_buf: &mut [u8] = unsafe { std::mem::transmute(self.req_buf.chunk_mut()) };
@@ -30,7 +30,7 @@ impl<'buf, 'stream> BodyReader<'buf, 'stream> {
     }
 }
 
-impl<'buf, 'stream> Read for BodyReader<'buf, 'stream> {
+impl Read for BodyReader<'_, '_> {
     // the user should control the body reading, don't exceeds the body!
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.total_read >= self.body_limit {
@@ -52,7 +52,7 @@ impl<'buf, 'stream> Read for BodyReader<'buf, 'stream> {
     }
 }
 
-impl<'buf, 'stream> BufRead for BodyReader<'buf, 'stream> {
+impl BufRead for BodyReader<'_, '_> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         let remain = self.body_limit - self.total_read;
         if remain == 0 {
@@ -73,7 +73,7 @@ impl<'buf, 'stream> BufRead for BodyReader<'buf, 'stream> {
     }
 }
 
-impl<'buf, 'stream> Drop for BodyReader<'buf, 'stream> {
+impl Drop for BodyReader<'_, '_> {
     fn drop(&mut self) {
         // consume all the remaining bytes
         while let Ok(n) = self.fill_buf().map(|b| b.len()) {
@@ -96,7 +96,7 @@ pub struct Request<'buf, 'header, 'stream> {
     stream: &'stream mut TcpStream,
 }
 
-impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
+impl<'buf, 'stream> Request<'buf, '_, 'stream> {
     pub fn method(&self) -> &str {
         self.req.method.unwrap()
     }
@@ -134,7 +134,7 @@ impl<'buf, 'header, 'stream> Request<'buf, 'header, 'stream> {
     }
 }
 
-impl<'buf, 'header, 'stream> fmt::Debug for Request<'buf, 'header, 'stream> {
+impl fmt::Debug for Request<'_, '_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<HTTP Request {} {}>", self.method(), self.path())
     }
