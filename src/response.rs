@@ -63,7 +63,9 @@ impl<'a> Response<'a> {
     }
 
     #[inline]
-    pub fn body_bytes(&mut self, b: bytes::Bytes) { self.body = Body::Bytes(b); }
+    pub fn body_bytes(&mut self, b: bytes::Bytes) {
+        self.body = Body::Bytes(b);
+    }
 
     #[inline]
     pub fn body_mut(&mut self) -> &mut BytesMut {
@@ -78,7 +80,7 @@ impl<'a> Response<'a> {
                 self.body = Body::Dummy;
             }
             Body::Bytes(ref b) => {
-                self.rsp_buf.extend_from_slice(b);
+                self.rsp_buf.extend_from_slice(b.as_ref());
                 self.body = Body::Dummy;
             }
         }
@@ -101,7 +103,7 @@ impl<'a> Response<'a> {
             Body::Dummy => self.rsp_buf.as_ref(),
             Body::Str(s) => s.as_bytes(),
             Body::Vec(ref v) => v,
-            Body::Bytes(ref b) => b,
+            Body::Bytes(ref b) => b.as_ref(),
         }
     }
 }
@@ -129,7 +131,7 @@ pub(crate) fn encode(mut rsp: Response, buf: &mut BytesMut) {
     buf.extend_from_slice(length.format(rsp.body_len()).as_bytes());
 
     // SAFETY: we already have bound check when insert headers
-    let headers = unsafe { rsp.headers.get_unchecked(..rsp.headers_len) };
+    let headers = &rsp.headers[..rsp.headers_len];
     for h in headers {
         buf.extend_from_slice(b"\r\n");
         buf.extend_from_slice(h.as_bytes());
