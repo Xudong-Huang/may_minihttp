@@ -31,7 +31,7 @@ impl BodyReader<'_, '_> {
 }
 
 impl Read for BodyReader<'_, '_> {
-    // the user should control the body reading, don't exceeds the body!
+    // the user should control the body reading, don't exceed the body!
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.total_read >= self.body_limit {
             return Ok(0);
