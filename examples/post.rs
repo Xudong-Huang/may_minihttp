@@ -9,10 +9,10 @@ struct HelloJson;
 impl HttpService for HelloJson {
     fn call(&mut self, req: Request, rsp: &mut Response) -> std::io::Result<()> {
         let method = req.method();
-        println!("method: {:?}", method);
+        println!("method: {method:?}");
         let mut body = req.body();
         let value: serde_json::Value = serde_json::from_slice(body.fill_buf()?)?;
-        println!("value: {:?}", value);
+        println!("value: {value:?}");
         rsp.header("Content-Type: application/json");
         let w = rsp.body_mut().writer();
 

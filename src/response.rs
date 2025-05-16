@@ -131,7 +131,7 @@ pub(crate) fn encode(mut rsp: Response, buf: &mut BytesMut) {
 
 #[cold]
 pub(crate) fn encode_error(e: io::Error, buf: &mut BytesMut) {
-    error!("error in service: err = {:?}", e);
+    error!("error in service: err = {e:?}");
     let msg_string = e.to_string();
     let msg = msg_string.as_bytes();
 

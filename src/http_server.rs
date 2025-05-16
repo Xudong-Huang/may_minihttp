@@ -62,7 +62,7 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
                     go!(
                         builder,
                         move || if let Err(e) = each_connection_loop(&mut stream, service) {
-                            error!("service err = {:?}", e);
+                            error!("service err = {e:?}");
                             stream.shutdown(std::net::Shutdown::Both).ok();
                         }
                     )
@@ -153,7 +153,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
             match service.call(req, &mut rsp) {
                 Ok(()) => response::encode(rsp, &mut rsp_buf),
                 Err(e) => {
-                    eprintln!("service err = {:?}", e);
+                    eprintln!("service err = {e:?}");
                     response::encode_error(e, &mut rsp_buf);
                 }
             }
@@ -225,7 +225,7 @@ impl<T: HttpService + Clone + Send + Sync + 'static> HttpServer<T> {
                     let service = service.clone();
                     go!(
                         move || if let Err(e) = each_connection_loop(&mut stream, service) {
-                            error!("service err = {:?}", e);
+                            error!("service err = {e:?}");
                             stream.shutdown(std::net::Shutdown::Both).ok();
                         }
                     );
