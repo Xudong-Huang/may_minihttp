@@ -36,6 +36,11 @@ buf-min = { version = "0.7", features = ["bytes"] }
 mimalloc = { version = "0.1", default-features = false }
 nanorand = { version = "0.7", default-features = false, features = ["std", "wyrand"] }
 
+# Load testing and integration testing
+goose = "0.18.1"
+testcontainers = "0.15"
+tokio = { version = "1", features = ["full"] }
+
 [target.'cfg(unix)'.dev-dependencies]
 may_postgres = { git = "https://github.com/Xudong-Huang/may_postgres.git", default-features = false }
 

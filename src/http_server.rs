@@ -132,8 +132,28 @@ pub(crate) fn reserve_buf(buf: &mut BytesMut) {
 ///
 pub struct HttpServer<T>(pub T);
 
+/// HTTP server with configurable max headers (const generic)
+///
+/// Use this when you need to handle more than 16 headers.
+/// Common sizes: 32 (Standard), 64 (Large), 128 (`XLarge`)
+///
+/// # Example
+/// ```ignore
+/// use may_minihttp::HttpServerWithHeaders;
+/// let server = HttpServerWithHeaders::<_, 32>(my_service);
+/// ```
+pub struct HttpServerWithHeaders<T, const N: usize>(pub T);
+
 #[cfg(unix)]
-fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) -> io::Result<()> {
+fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, service: T) -> io::Result<()> {
+    each_connection_loop_with_headers::<T, { request::MAX_HEADERS }>(stream, service)
+}
+
+#[cfg(unix)]
+fn each_connection_loop_with_headers<T: HttpService, const N: usize>(
+    stream: &mut TcpStream,
+    mut service: T,
+) -> io::Result<()> {
     let mut req_buf = BytesMut::with_capacity(BUF_LEN);
     let mut rsp_buf = BytesMut::with_capacity(BUF_LEN);
     let mut body_buf = BytesMut::with_capacity(4096);
@@ -143,7 +163,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 
         // prepare the requests, we should make sure the request is fully read
         loop {
-            let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
+            let mut headers = [MaybeUninit::uninit(); N];
             let req = match request::decode(&mut headers, &mut req_buf, stream)? {
                 Some(req) => req,
                 None => break,
@@ -171,7 +191,15 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
 }
 
 #[cfg(not(unix))]
-fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) -> io::Result<()> {
+fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, service: T) -> io::Result<()> {
+    each_connection_loop_with_headers::<T, { request::MAX_HEADERS }>(stream, service)
+}
+
+#[cfg(not(unix))]
+fn each_connection_loop_with_headers<T: HttpService, const N: usize>(
+    stream: &mut TcpStream,
+    mut service: T,
+) -> io::Result<()> {
     let mut req_buf = BytesMut::with_capacity(BUF_LEN);
     let mut rsp_buf = BytesMut::with_capacity(BUF_LEN);
     let mut body_buf = BytesMut::with_capacity(BUF_LEN);
@@ -189,7 +217,7 @@ fn each_connection_loop<T: HttpService>(stream: &mut TcpStream, mut service: T) 
         // prepare the requests
         if read_cnt > 0 {
             loop {
-                let mut headers = [MaybeUninit::uninit(); request::MAX_HEADERS];
+                let mut headers = [MaybeUninit::uninit(); N];
                 let req = match request::decode(&mut headers, &mut req_buf, stream)? {
                     Some(req) => req,
                     None => break,
@@ -229,6 +257,31 @@ impl<T: HttpService + Clone + Send + Sync + 'static> HttpServer<T> {
                             stream.shutdown(std::net::Shutdown::Both).ok();
                         }
                     );
+                }
+            }
+        )
+    }
+}
+
+impl<T: HttpService + Clone + Send + Sync + 'static, const N: usize> HttpServerWithHeaders<T, N> {
+    /// Spawns the http service with custom max headers, binding to the given address
+    /// return a coroutine that you can cancel it when need to stop the service
+    pub fn start<L: ToSocketAddrs>(self, addr: L) -> io::Result<coroutine::JoinHandle<()>> {
+        let listener = TcpListener::bind(addr)?;
+        let service = self.0;
+        go!(
+            coroutine::Builder::new().name("TcpServer".to_owned()),
+            move || {
+                for stream in listener.incoming() {
+                    let mut stream = t_c!(stream);
+                    // t_c!(stream.set_nodelay(true));
+                    let service = service.clone();
+                    go!(move || if let Err(e) =
+                        each_connection_loop_with_headers::<T, N>(&mut stream, service)
+                    {
+                        error!("service err = {e:?}");
+                        stream.shutdown(std::net::Shutdown::Both).ok();
+                    });
                 }
             }
         )

@@ -201,7 +201,7 @@ mod __impl {
                 }
             }
 
-            let mut params: Vec<&(dyn ToSql)> = Vec::with_capacity(num * 3);
+            let mut params: Vec<&dyn ToSql> = Vec::with_capacity(num * 3);
             for w in &worlds {
                 params.push(&w.id);
                 params.push(&w.randomnumber);

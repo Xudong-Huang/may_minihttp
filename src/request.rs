@@ -2,7 +2,162 @@ use std::fmt;
 use std::io::{self, BufRead, Read};
 use std::mem::MaybeUninit;
 
-pub(crate) const MAX_HEADERS: usize = 16;
+/// Maximum header buffer size configurations.
+///
+/// This enum provides pre-defined buffer sizes for different use cases while
+/// allowing custom sizes via the `Custom` variant.
+///
+/// # Examples
+///
+/// ```
+/// use may_minihttp::MaxHeaders;
+///
+/// let default = MaxHeaders::Default;
+/// assert_eq!(default.value(), 16);
+///
+/// let large = MaxHeaders::Large;
+/// assert_eq!(large.value(), 64);
+///
+/// let custom = MaxHeaders::Custom(100);
+/// assert_eq!(custom.value(), 100);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Maximum number of HTTP header lines to accept in a single request.
+///
+/// This enum controls how many **individual header lines** the parser will accept.
+/// Each variant represents a specific count of header items (not bytes or kilobytes).
+///
+/// # What Counts as a Header?
+///
+/// Each line in the HTTP request counts as one header:
+/// ```http
+/// GET /api HTTP/1.1
+/// Host: example.com              ← Header 1
+/// User-Agent: Mozilla/5.0        ← Header 2
+/// Accept: application/json       ← Header 3
+/// X-Custom-Header: value         ← Header 4
+/// ```
+///
+/// # Choosing the Right Size
+///
+/// | Variant | Count | Use Case | Example Environment |
+/// |---------|-------|----------|---------------------|
+/// | `Default` | 16 | Simple APIs, controlled environments | Direct API calls, testing |
+/// | `Standard` | 32 | Most web applications | Standard web apps behind single proxy |
+/// | `Large` | 64 | Complex deployments | Multiple proxies, load balancers |
+/// | `XLarge` | 128 | Production infrastructure | Kubernetes, service mesh, multiple proxy layers |
+///
+/// # Real-World Header Counts
+///
+/// - **Direct browser request**: 10-15 headers
+/// - **Browser + CDN**: 15-25 headers
+/// - **Browser + CDN + Load Balancer**: 25-40 headers
+/// - **Kubernetes (Ingress + Service Mesh)**: 40-80 headers
+/// - **Full enterprise stack**: 60-100+ headers
+///
+/// # Memory Impact
+///
+/// Each header slot consumes a small amount of stack memory (typically ~24 bytes for
+/// the header reference). Increasing the limit has minimal memory overhead.
+///
+/// # Examples
+///
+/// ```rust
+/// use may_minihttp::MaxHeaders;
+///
+/// // For a simple API with direct clients
+/// let simple = MaxHeaders::Default;  // 16 header items
+/// assert_eq!(simple.value(), 16);
+///
+/// // For production Kubernetes deployment
+/// let production = MaxHeaders::XLarge;  // 128 header items
+/// assert_eq!(production.value(), 128);
+///
+/// // Custom size (clamped to 1-256 range)
+/// let custom = MaxHeaders::Custom(96);  // 96 header items
+/// assert_eq!(custom.value(), 96);
+/// ```
+#[derive(Default)]
+pub enum MaxHeaders {
+    /// Default: 16 header items (backwards compatible, minimal memory)
+    ///
+    /// Accepts up to **16 individual HTTP header lines**.
+    ///
+    /// **Suitable for**: Simple APIs, controlled environments, testing
+    #[default]
+    Default,
+
+    /// Standard: 32 header items
+    ///
+    /// Accepts up to **32 individual HTTP header lines**.
+    ///
+    /// **Suitable for**: Most web applications, single proxy/load balancer
+    Standard,
+
+    /// Large: 64 header items
+    ///
+    /// Accepts up to **64 individual HTTP header lines**.
+    ///
+    /// **Suitable for**: Applications behind load balancers, CDN + proxy
+    Large,
+
+    /// `XLarge`: 128 header items
+    ///
+    /// Accepts up to **128 individual HTTP header lines**.
+    ///
+    /// **Suitable for**: Production services in Kubernetes, service mesh,
+    /// multiple proxy layers, enterprise environments with extensive headers
+    XLarge,
+
+    /// Custom size: 1-256 header items
+    ///
+    /// Accepts up to the specified number of **individual HTTP header lines**.
+    ///
+    /// Values are automatically clamped:
+    /// - Minimum: 16 (if 0 is specified)
+    /// - Maximum: 256
+    ///
+    /// # Example
+    /// ```rust
+    /// use may_minihttp::MaxHeaders;
+    ///
+    /// let custom = MaxHeaders::Custom(96);  // 96 header items
+    /// assert_eq!(custom.value(), 96);
+    ///
+    /// let clamped_low = MaxHeaders::Custom(0);  // Clamped to 16
+    /// assert_eq!(clamped_low.value(), 16);
+    ///
+    /// let clamped_high = MaxHeaders::Custom(512);  // Clamped to 256
+    /// assert_eq!(clamped_high.value(), 256);
+    /// ```
+    Custom(usize),
+}
+
+impl MaxHeaders {
+    /// Get the numeric value of the max headers setting
+    #[must_use]
+    pub const fn value(&self) -> usize {
+        match self {
+            MaxHeaders::Default => 16,
+            MaxHeaders::Standard => 32,
+            MaxHeaders::Large => 64,
+            MaxHeaders::XLarge => 128,
+            MaxHeaders::Custom(n) => {
+                // Clamp to reasonable range
+                if *n == 0 {
+                    16
+                } else if *n > 256 {
+                    256
+                } else {
+                    *n
+                }
+            }
+        }
+    }
+}
+
+/// Default maximum number of HTTP headers (backwards compatible)
+pub(crate) const MAX_HEADERS: usize = MaxHeaders::Default.value();
 
 use bytes::{Buf, BufMut, BytesMut};
 use may::net::TcpStream;
@@ -140,8 +295,8 @@ impl fmt::Debug for Request<'_, '_, '_> {
     }
 }
 
-pub fn decode<'header, 'buf, 'stream>(
-    headers: &'header mut [MaybeUninit<httparse::Header<'buf>>; MAX_HEADERS],
+pub fn decode<'header, 'buf, 'stream, const N: usize>(
+    headers: &'header mut [MaybeUninit<httparse::Header<'buf>>; N],
     req_buf: &'buf mut BytesMut,
     stream: &'stream mut TcpStream,
 ) -> io::Result<Option<Request<'buf, 'header, 'stream>>> {
@@ -149,11 +304,53 @@ pub fn decode<'header, 'buf, 'stream>(
     // safety: don't hold the reference of req_buf
     // so we can transfer the mutable reference to Request
     let buf: &[u8] = unsafe { std::mem::transmute(req_buf.chunk()) };
+
+    // Wait for complete headers before parsing to prevent token errors
+    // This fixes issue #18 where headers arriving in multiple TCP packets
+    // would cause "Token" parsing errors
+    // The \r\n\r\n sequence marks the end of HTTP headers
+    if !buf.windows(4).any(|window| window == b"\r\n\r\n") {
+        return Ok(None); // Need more data
+    }
+
+    // Get the header limit before parsing (to avoid borrow issues)
+    let header_limit = headers.len();
+
     let status = match req.parse_with_uninit_headers(buf, headers) {
         Ok(s) => s,
         Err(e) => {
-            let msg = format!("failed to parse http request: {e:?}");
-            eprintln!("{msg}");
+            // Provide detailed error message for TooManyHeaders
+            let msg = if e == httparse::Error::TooManyHeaders {
+                // Count how many headers were actually sent
+                let header_count = buf
+                    .split(|&b| b == b'\n')
+                    .filter(|line| {
+                        !line.is_empty() && line.contains(&b':') && !line.starts_with(b"\r\n")
+                    })
+                    .count();
+
+                let over_by = header_count.saturating_sub(header_limit);
+
+                let error_msg = format!(
+                    "TooManyHeaders: received {header_count} headers, limit is {header_limit} (over by {over_by})"
+                );
+
+                // Log the error
+                eprintln!("{error_msg}");
+
+                // Log the suggestion on a separate line for clarity
+                eprintln!(
+                    "Suggestion: Consider using MaxHeaders::Standard (32), \
+                     MaxHeaders::Large (64), or MaxHeaders::XLarge (128) for production deployments."
+                );
+
+                error_msg
+            } else {
+                let error_msg = format!("failed to parse http request: {e:?}");
+                eprintln!("{error_msg}");
+                error_msg
+            };
+
             return err(io::Error::other(msg));
         }
     };
@@ -170,4 +367,68 @@ pub fn decode<'header, 'buf, 'stream>(
         req_buf,
         stream,
     }))
+}
+
+/// Decode HTTP request with Default (16) headers
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The TCP stream cannot be read
+/// - The HTTP request is malformed
+/// - The number of headers exceeds 16
+pub fn decode_default<'header, 'buf, 'stream>(
+    headers: &'header mut [MaybeUninit<httparse::Header<'buf>>; 16],
+    req_buf: &'buf mut BytesMut,
+    stream: &'stream mut TcpStream,
+) -> io::Result<Option<Request<'buf, 'header, 'stream>>> {
+    decode(headers, req_buf, stream)
+}
+
+/// Decode HTTP request with Standard (32) headers
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The TCP stream cannot be read
+/// - The HTTP request is malformed
+/// - The number of headers exceeds 32
+pub fn decode_standard<'header, 'buf, 'stream>(
+    headers: &'header mut [MaybeUninit<httparse::Header<'buf>>; 32],
+    req_buf: &'buf mut BytesMut,
+    stream: &'stream mut TcpStream,
+) -> io::Result<Option<Request<'buf, 'header, 'stream>>> {
+    decode(headers, req_buf, stream)
+}
+
+/// Decode HTTP request with Large (64) headers
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The TCP stream cannot be read
+/// - The HTTP request is malformed
+/// - The number of headers exceeds 64
+pub fn decode_large<'header, 'buf, 'stream>(
+    headers: &'header mut [MaybeUninit<httparse::Header<'buf>>; 64],
+    req_buf: &'buf mut BytesMut,
+    stream: &'stream mut TcpStream,
+) -> io::Result<Option<Request<'buf, 'header, 'stream>>> {
+    decode(headers, req_buf, stream)
+}
+
+/// Decode HTTP request with `XLarge` (128) headers
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The TCP stream cannot be read
+/// - The HTTP request is malformed
+/// - The number of headers exceeds 128
+pub fn decode_xlarge<'header, 'buf, 'stream>(
+    headers: &'header mut [MaybeUninit<httparse::Header<'buf>>; 128],
+    req_buf: &'buf mut BytesMut,
+    stream: &'stream mut TcpStream,
+) -> io::Result<Option<Request<'buf, 'header, 'stream>>> {
+    decode(headers, req_buf, stream)
 }

@@ -1,0 +1,219 @@
+name: Header Load Tests
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  integration-tests:
+    name: Integration Tests with RAII
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run integration tests
+        run: |
+          cargo test --test header_traffic_integration -- --nocapture
+          
+      - name: Run MaxHeaders enum tests
+        run: |
+          cargo test --test max_headers_enum -- --nocapture
+
+  build-test-image:
+    name: Build Test Server Image
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Build test container image
+        run: |
+          docker build -f docker/Dockerfile.test -t may-minihttp-test:latest .
+
+      - name: Install uuidgen
+        run: sudo apt-get update && sudo apt-get install -y uuid-runtime
+
+      - name: Push to ttl.sh ephemeral registry
+        id: push
+        run: |
+          IMAGE_NAME=$(uuidgen)
+          IMAGE="ttl.sh/${IMAGE_NAME}:1h"
+          echo "Pushing to $IMAGE"
+          docker tag may-minihttp-test:latest "$IMAGE"
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "Pushed image: $IMAGE"
+
+      - name: Verify image can be pulled
+        run: |
+          echo "Verifying image: ${{ steps.push.outputs.image }}"
+          docker pull "${{ steps.push.outputs.image }}"
+          docker run --rm -d --name verify-test -p 8081:8081 "${{ steps.push.outputs.image }}"
+          sleep 3
+          docker logs verify-test || true
+          docker stop verify-test || true
+
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+
+  goose-load-tests:
+    name: Goose Load Tests
+    runs-on: ubuntu-latest
+    needs: build-test-image
+    
+    services:
+      test-server:
+        image: ${{ needs.build-test-image.outputs.image }}
+        ports:
+          - 8081:8081
+        options: >-
+          --name test-server
+          --health-cmd "curl -f http://localhost:8081/ || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-goose-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Verify test server is ready
+        run: |
+          echo "Test server is automatically started by GitHub Actions services"
+          echo "Verifying connectivity..."
+          curl -f http://localhost:8081/ || (echo "Server not ready" && exit 1)
+          echo "Server is ready!"
+
+      - name: Run Goose load tests
+        run: |
+          echo "Running Goose load tests against http://localhost:8081"
+          cargo test --test goose_header_load_test -- --nocapture
+        env:
+          TEST_SERVICE_HOST: localhost
+          TEST_SERVICE_PORT: 8081
+
+      # Goose generates its own reports when successful
+      # Only upload if the reports actually exist
+      - name: Check for Goose reports
+        if: always()
+        id: check_reports
+        run: |
+          if [ -f "goose-report.html" ] || [ -f "goose-report.json" ] || ls goose-*.txt 2>/dev/null; then
+            echo "reports_exist=true" >> $GITHUB_OUTPUT
+          else
+            echo "reports_exist=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Goose reports
+        if: always() && steps.check_reports.outputs.reports_exist == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: goose-reports
+          path: |
+            goose-*.html
+            goose-*.json
+            goose-*.txt
+          retention-days: 7
+
+  testcontainers:
+    name: Testcontainers Integration
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-testcontainers-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Verify Docker is available
+        run: |
+          docker --version
+          docker ps
+
+      - name: Run testcontainers tests
+        run: |
+          cargo test --test test_server -- --nocapture
+          cargo test --test request_parsing -- --nocapture
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [integration-tests, goose-load-tests, testcontainers]
+    if: always()
+    
+    steps:
+      - name: Check test results
+        run: |
+          echo "## Header Load Tests Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Suite | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Goose Load Tests | ${{ needs.goose-load-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Testcontainers | ${{ needs.testcontainers.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.integration-tests.result }}" = "success" ] && \
+             [ "${{ needs.goose-load-tests.result }}" = "success" ] && \
+             [ "${{ needs.testcontainers.result }}" = "success" ]; then
+            echo "All tests passed!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Some tests failed. Check the logs above." >> $GITHUB_STEP_SUMMARY
+          fi
+

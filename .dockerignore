@@ -1,0 +1,28 @@
+# Build artifacts
+target/
+*.rlib
+*.so
+*.dylib
+*.dll
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# CI/CD
+.github/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test artifacts
+*.log
+
