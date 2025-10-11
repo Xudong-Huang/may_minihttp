@@ -141,13 +141,38 @@ jobs:
             sleep 0.5
           done
 
+      - name: Resolve service container info
+        id: svc
+        run: |
+          CID=$(docker ps --filter "name=^/test-server$" -q)
+          echo "Container ID: $CID"
+          docker inspect "$CID" --format '{{.Name}} {{.State.Status}} {{.State.Pid}}' || true
+          PID=$(docker inspect -f '{{.State.Pid}}' "$CID" 2>/dev/null || echo "0")
+          echo "Container PID: $PID"
+          echo "cid=$CID" >> $GITHUB_OUTPUT
+          echo "pid=$PID" >> $GITHUB_OUTPUT
+          
+          # Show container stats for debugging
+          docker stats --no-stream "$CID" || true
+
       - name: Run Goose load tests
         run: |
           echo "Running Goose load tests against http://localhost:8081"
+          echo "Container ID: ${{ steps.svc.outputs.cid }}"
+          echo "Container PID: ${{ steps.svc.outputs.pid }}"
           cargo test --test goose_header_load_test -- --nocapture
         env:
           TEST_SERVICE_HOST: localhost
           TEST_SERVICE_PORT: 8081
+
+      - name: Show container logs
+        if: always()
+        run: |
+          echo "=== Test Server Logs ==="
+          docker logs test-server 2>&1 || echo "Could not retrieve container logs"
+          echo ""
+          echo "=== Container Stats ==="
+          docker stats --no-stream test-server 2>&1 || true
 
       # Goose generates its own reports when successful
       # Only upload if the reports actually exist
