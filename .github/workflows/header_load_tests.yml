@@ -97,7 +97,7 @@ jobs:
       test-server:
         image: ${{ needs.build-test-image.outputs.image }}
         ports:
-          - 8081:8081
+          - 19001:8081
         options: >-
           --name test-server
           --health-cmd "curl -f http://localhost:8081/ || exit 1"
@@ -125,11 +125,11 @@ jobs:
 
       - name: Wait for service readiness
         run: |
-          echo "Waiting for test server to be ready..."
+          echo "Waiting for test server to be ready on port 19001..."
           for i in $(seq 1 120); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/ 2>/dev/null || echo "000")
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19001/ 2>/dev/null || echo "000")
             if [ "$code" = "200" ]; then
-              echo "Service ready! (HTTP $code)"
+              echo "Service ready! (HTTP $code on port 19001)"
               break
             fi
             if [ $i -eq 120 ]; then
@@ -155,15 +155,17 @@ jobs:
           # Show container stats for debugging
           docker stats --no-stream "$CID" || true
 
-      - name: Run Goose load tests
+      - name: Run Goose load tests - WARNING Errors in this are expected as this is the Library generating exceptions as expected!
         run: |
-          echo "Running Goose load tests against http://localhost:8081"
+          echo "Running Goose load tests"
+          echo "Service mapped to host port 19001 (container port 8081)"
           echo "Container ID: ${{ steps.svc.outputs.cid }}"
           echo "Container PID: ${{ steps.svc.outputs.pid }}"
-          cargo test --test goose_header_load_test -- --nocapture
+          echo "Goose tests will use dynamic ports 19000-19004"
+          cargo test --test goose_header_load_test
         env:
           TEST_SERVICE_HOST: localhost
-          TEST_SERVICE_PORT: 8081
+          TEST_SERVICE_PORT: 19001
 
       - name: Show container logs
         if: always()
