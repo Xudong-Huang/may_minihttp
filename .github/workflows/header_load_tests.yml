@@ -123,12 +123,23 @@ jobs:
             target
           key: ${{ runner.os }}-goose-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Verify test server is ready
+      - name: Wait for service readiness
         run: |
-          echo "Test server is automatically started by GitHub Actions services"
-          echo "Verifying connectivity..."
-          curl -f http://localhost:8081/ || (echo "Server not ready" && exit 1)
-          echo "Server is ready!"
+          echo "Waiting for test server to be ready..."
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/ 2>/dev/null || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "Service ready! (HTTP $code)"
+              break
+            fi
+            if [ $i -eq 120 ]; then
+              echo "Service failed to become ready after 60 seconds"
+              echo "Last HTTP code: $code"
+              docker logs test-server 2>&1 || echo "Could not retrieve container logs"
+              exit 1
+            fi
+            sleep 0.5
+          done
 
       - name: Run Goose load tests
         run: |
