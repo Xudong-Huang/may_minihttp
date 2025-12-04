@@ -15,6 +15,19 @@ use may::io::WaitIo;
 use may::net::{TcpListener, TcpStream};
 use may::{coroutine, go};
 
+/// Check if an error is a normal client disconnect (not worth logging as ERROR)
+#[inline]
+fn is_client_disconnect(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::NotConnected
+            | io::ErrorKind::UnexpectedEof
+    )
+}
+
 macro_rules! t_c {
     ($e: expr) => {
         match $e {
@@ -62,7 +75,10 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
                     go!(
                         builder,
                         move || if let Err(e) = each_connection_loop(&mut stream, service) {
-                            error!("service err = {e:?}");
+                            // Only log actual errors, not normal client disconnects
+                            if !is_client_disconnect(&e) {
+                                error!("service err = {e:?}");
+                            }
                             stream.shutdown(std::net::Shutdown::Both).ok();
                         }
                     )
@@ -253,7 +269,10 @@ impl<T: HttpService + Clone + Send + Sync + 'static> HttpServer<T> {
                     let service = service.clone();
                     go!(
                         move || if let Err(e) = each_connection_loop(&mut stream, service) {
-                            error!("service err = {e:?}");
+                            // Only log actual errors, not normal client disconnects
+                            if !is_client_disconnect(&e) {
+                                error!("service err = {e:?}");
+                            }
                             stream.shutdown(std::net::Shutdown::Both).ok();
                         }
                     );
@@ -279,7 +298,10 @@ impl<T: HttpService + Clone + Send + Sync + 'static, const N: usize> HttpServerW
                     go!(move || if let Err(e) =
                         each_connection_loop_with_headers::<T, N>(&mut stream, service)
                     {
-                        error!("service err = {e:?}");
+                        // Only log actual errors, not normal client disconnects
+                        if !is_client_disconnect(&e) {
+                            error!("service err = {e:?}");
+                        }
                         stream.shutdown(std::net::Shutdown::Both).ok();
                     });
                 }
