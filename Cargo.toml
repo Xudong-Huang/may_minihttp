@@ -20,8 +20,7 @@ httpdate = "1"
 httparse = "1"
 once_cell = "1"
 
-# Using our fork with JSF-compliant unwrap() fixes and safe coroutine spawning
-may = { git = "https://github.com/microscaler/may.git", branch = "task-1.1-safe-coroutine-spawning", default-features = false }
+may = { version = "0.3.46", default-features = false }
 
 [dev-dependencies]
 atoi = "2"
