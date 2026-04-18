@@ -36,7 +36,7 @@ fn main() {
         .start(&bind_addr)
         .unwrap();
 
-    println!("Server listening on http://{}", bind_addr);
+    println!("Server listening on http://{bind_addr}");
     println!("Configured to accept up to 32 headers");
     server.wait();
 }

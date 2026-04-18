@@ -1,4 +1,7 @@
-FROM rust:1.83-slim AS builder
+# Rust 1.85 is required: transitive deps like `cpufeatures` (pulled in via
+# `sha2` / OpenSSL paths) need the `edition2024` feature, which Cargo
+# stabilised in 1.85 (Feb 2025). Rust 1.83 fails to parse those manifests.
+FROM rust:1.85-slim AS builder
 WORKDIR /app
 
 # Install build dependencies for OpenSSL and other native dependencies

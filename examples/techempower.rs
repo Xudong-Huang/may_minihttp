@@ -71,7 +71,7 @@ mod __impl {
                 .map(|_| may::go!(move || PgConnection::new(db_url)))
                 .collect::<Vec<_>>();
             let mut clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
-            clients.sort_by(|a, b| (a.client.id() % size).cmp(&(b.client.id() % size)));
+            clients.sort_by_key(|c| c.client.id() % size);
             // for c in &clients {
             //     println!("client id: {}", c.client.id());
             // }
