@@ -305,13 +305,21 @@ pub fn decode<'header, 'buf, 'stream, const N: usize>(
     // so we can transfer the mutable reference to Request
     let buf: &[u8] = unsafe { std::mem::transmute(req_buf.chunk()) };
 
-    // Wait for complete headers before parsing to prevent token errors
-    // This fixes issue #18 where headers arriving in multiple TCP packets
-    // would cause "Token" parsing errors
-    // The \r\n\r\n sequence marks the end of HTTP headers
-    if !buf.windows(4).any(|window| window == b"\r\n\r\n") {
-        return Ok(None); // Need more data
-    }
+    // Note: no `\r\n\r\n` pre-scan — `httparse::Request::parse` already
+    // returns `Status::Partial` on any truncated input (mid-method,
+    // mid-path, mid-version, mid-header-name, mid-header-value, or just
+    // missing the terminating `\r\n\r\n`). The `Status::Partial` arm below
+    // maps that to `Ok(None)`, which is identical to what the old
+    // `buf.windows(4).any(|w| w == b"\r\n\r\n")` pre-check did — only
+    // without an O(n) re-scan of the buffer before the real parse.
+    //
+    // An empirical probe across 15 input shapes (see PR description)
+    // confirmed: every truncation yields `Partial`, never `Token`. The
+    // `Token` / `HeaderName` / `Version` errors only fire on genuinely
+    // malformed bytes (e.g. `G@T`, space in path), which are permanent
+    // failures regardless of how much more data arrives — surfacing them
+    // at first sight (400) is more correct than buffering the connection
+    // until some later `\r\n\r\n` happens to appear.
 
     // Get the header limit before parsing (to avoid borrow issues)
     let header_limit = headers.len();
