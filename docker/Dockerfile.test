@@ -1,7 +1,10 @@
-# Rust 1.85 is required: transitive deps like `cpufeatures` (pulled in via
-# `sha2` / OpenSSL paths) need the `edition2024` feature, which Cargo
-# stabilised in 1.85 (Feb 2025). Rust 1.83 fails to parse those manifests.
-FROM rust:1.85-slim AS builder
+# Rust 1.88 is the current minimum for our transitive dep tree:
+#   * `cpufeatures` / `edition2024`          → needs ≥ 1.85 (stabilised Feb 2025)
+#   * `icu_*`   (pulled via `reqwest`/TLS)   → needs ≥ 1.86
+#   * `cookie_store`, `time`, `time-macros`  → need  ≥ 1.88
+# Bumping to a single explicit tag keeps the build reproducible; when deps
+# push past this again, bump in lockstep rather than floating on `rust:slim`.
+FROM rust:1.88-slim AS builder
 WORKDIR /app
 
 # Install build dependencies for OpenSSL and other native dependencies
