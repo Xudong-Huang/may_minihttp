@@ -251,6 +251,7 @@ fn each_connection_loop_with_headers<T: HttpService, const N: usize>(
 
         // send the result back to client
         stream.write_all(&rsp_buf)?;
+        rsp_buf.clear();
     }
 }
 

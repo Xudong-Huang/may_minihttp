@@ -19,7 +19,8 @@ use bytes::BufMut;
 use may_minihttp::{HttpServer, HttpService, Request, Response};
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Once;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Once};
 use std::thread;
 use std::time::Duration;
 
@@ -40,10 +41,6 @@ impl HttpService for TestService {
         use std::io::Write;
 
         let header_count = req.headers().len();
-
-        // Enable keep-alive to prevent connection drops
-        res.header("Connection: keep-alive");
-        res.header("Keep-Alive: timeout=5, max=1000");
 
         // Build a simple response
         let response = format!("OK:{}", header_count);
@@ -110,7 +107,8 @@ fn ensure_port_available(preferred_port: u16) -> u16 {
 /// services are running.
 struct HeaderTestServer {
     port: u16,
-    handle: Option<may::coroutine::JoinHandle<()>>,
+    shutdown: Arc<AtomicBool>,
+    server_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl HeaderTestServer {
@@ -133,18 +131,30 @@ impl HeaderTestServer {
         // Check port availability and find alternative if needed
         let port = ensure_port_available(preferred_port);
 
-        // Start the HTTP server in the MAIN THREAD (not a background thread)
-        // This matches BRRTRouter's pattern exactly:
-        // - HttpServer.start() spawns a coroutine and returns immediately
-        // - The JoinHandle keeps the server running
-        // - No thread::spawn needed - MAY handles concurrency with coroutines
-        let handle = HttpServer(TestService)
-            .start(&format!("127.0.0.1:{}", port))
-            .expect("Failed to start test server");
+        // Run the MAY server on a dedicated OS thread so blocking std::net clients
+        // in the test thread cannot stall the IOCP scheduler (Windows) or accept loop.
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+        let addr = format!("127.0.0.1:{}", port);
+        let server_thread = thread::spawn(move || {
+            let handle = HttpServer(TestService)
+                .start(&addr)
+                .expect("Failed to start test server");
+
+            while !shutdown_clone.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            unsafe {
+                handle.coroutine().cancel();
+            }
+            let _ = handle.join();
+        });
 
         let fixture = Self {
             port,
-            handle: Some(handle),
+            shutdown,
+            server_thread: Some(server_thread),
         };
 
         // Wait for server to be ready
@@ -167,12 +177,13 @@ impl HeaderTestServer {
     fn wait_for_ready(&self, max_attempts: u32) -> bool {
         for attempt in 0..max_attempts {
             if let Ok(mut stream) = TcpStream::connect(format!("127.0.0.1:{}", self.port)) {
-                // Send a minimal HTTP request
-                let request = format!("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+                // Close after probe so Windows blocking server handlers release the worker.
+                let request = "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
                 if stream.write_all(request.as_bytes()).is_ok() {
                     // Try to read some response
                     let mut buf = [0u8; 256];
                     if stream.read(&mut buf).is_ok() {
+                        let _ = stream.shutdown(std::net::Shutdown::Both);
                         eprintln!(
                             "[READY] Server on port {} is ready (attempt {})",
                             self.port,
@@ -199,12 +210,8 @@ impl HeaderTestServer {
 
 impl Drop for HeaderTestServer {
     fn drop(&mut self) {
-        // Cancel the server coroutine and wait for it to finish
-        // This matches BRRTRouter's ServerHandle::stop() implementation
-        if let Some(handle) = self.handle.take() {
-            unsafe {
-                handle.coroutine().cancel();
-            }
+        self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.server_thread.take() {
             let _ = handle.join();
         }
         eprintln!("[CLEANUP] HeaderTestServer on port {} shut down", self.port);
@@ -212,10 +219,6 @@ impl Drop for HeaderTestServer {
 }
 
 fn send_request_with_headers(port: u16, num_headers: usize) -> io::Result<String> {
-    let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-
     // Build HTTP request with specified number of headers
     let mut request = String::from("GET /test HTTP/1.1\r\n");
     request.push_str("Host: localhost\r\n");
@@ -226,6 +229,33 @@ fn send_request_with_headers(port: u16, num_headers: usize) -> io::Result<String
     }
 
     request.push_str("\r\n"); // End of headers
+
+    // On Windows the server uses blocking reads; retry briefly while the
+    // previous connection handler releases its worker thread.
+    let mut last_err = None;
+    for attempt in 0..3u32 {
+        if attempt > 0 {
+            thread::sleep(Duration::from_millis(100 * attempt as u64));
+        }
+        match send_single_request(port, &request) {
+            Ok(response) => return Ok(response),
+            Err(e) => {
+                // Retry on timeout/refused (common on Windows IOCP)
+                let kind = e.kind();
+                if kind != io::ErrorKind::TimedOut && kind != io::ErrorKind::ConnectionRefused {
+                    return Err(e);
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.expect("loop always has error"))
+}
+
+fn send_single_request(port: u16, request: &str) -> io::Result<String> {
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
 
     // Send request
     stream.write_all(request.as_bytes())?;
@@ -240,9 +270,14 @@ fn send_request_with_headers(port: u16, num_headers: usize) -> io::Result<String
             Ok(0) => break, // Connection closed
             Ok(n) => response.extend_from_slice(&buffer[0..n]),
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => break,
             Err(e) => return Err(e),
         }
     }
+
+    // Half-close so Windows blocking server handlers exit their read loop
+    // without adding Connection: close to the header count under test.
+    let _ = stream.shutdown(std::net::Shutdown::Write);
 
     String::from_utf8(response).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }

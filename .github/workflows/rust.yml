@@ -11,15 +11,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
   lints:
-    name: Run cargo fmt and cargo clippy ${{ matrix.rust }} on ${{ matrix.os }}
+    name: Lints (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        rust:
-          - stable
         os:
           - ubuntu-latest
           - windows-latest
@@ -27,24 +26,298 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
           components: rustfmt, clippy
       - name: cargo fmt --check
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
       - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
+        run: cargo clippy -- -D warnings
+
+  tests:
+    name: Tests (${{ matrix.os }}, ${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    needs: [lints]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: default
+            cargo_args: ""
+          - os: ubuntu-latest
+            name: client
+            cargo_args: "--features client"
+          - os: windows-latest
+            name: default
+            cargo_args: ""
+          - os: windows-latest
+            name: client
+            cargo_args: "--features client"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: Run unit tests with nextest
+        shell: bash
+        run: |
+          mkdir -p target/nextest
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 \
+            cargo nextest run --workspace --all-features \
+              --lib \
+              --test client_integration \
+              --test header_traffic_integration \
+              --test max_headers_enum \
+              --test request_parsing \
+              --test simple_header_test \
+              --message-format libtest-json \
+              2>&1 \
+            > target/nextest/unit-${{ matrix.name }}-${{ matrix.os }}.json
+          # Generate human-readable report + JSON summary from JSONL
+          python3 hack/nextest-report.py \
+            --title "Unit Tests — ${{ matrix.os }} / ${{ matrix.name }}" \
+            --output-json target/nextest/unit-${{ matrix.name }}-${{ matrix.os }}-summary.json \
+            target/nextest/unit-${{ matrix.name }}-${{ matrix.os }}.json \
+            2>&1 \
+            > target/nextest/unit-${{ matrix.name }}-${{ matrix.os }}-report.md
+      - name: Run integration tests with nextest
+        if: matrix.name == 'client'
+        shell: bash
+        run: |
+          mkdir -p target/nextest
+          export RUST_BACKTRACE=${{ matrix.os == 'windows-latest' && '1' || 'full' }}
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 \
+            cargo nextest run \
+              --test client_integration \
+              --test header_traffic_integration \
+              ${{ matrix.cargo_args }} \
+              --message-format libtest-json 2>&1 \
+            > target/nextest/integration-${{ matrix.name }}-${{ matrix.os }}.json
+          python3 hack/nextest-report.py \
+            --title "Integration Tests — ${{ matrix.os }} / ${{ matrix.name }}" \
+            --output-json target/nextest/integration-${{ matrix.name }}-${{ matrix.os }}-summary.json \
+            target/nextest/integration-${{ matrix.name }}-${{ matrix.os }}.json \
+            2>&1 \
+            > target/nextest/integration-${{ matrix.name }}-${{ matrix.os }}-report.md
+      - name: Run perf memory tests with nextest
+        if: matrix.name == 'client' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p target/nextest
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 \
+            cargo nextest run \
+              --test perf_memory \
+              ${{ matrix.cargo_args }} \
+              --message-format libtest-json 2>&1 \
+            > target/nextest/perf-memory-${{ matrix.name }}-ubuntu.json
+          python3 hack/nextest-report.py \
+            --title "Memory Profiling — ${{ matrix.os }} / ${{ matrix.name }}" \
+            --output-json target/nextest/perf-memory-${{ matrix.name }}-summary.json \
+            target/nextest/perf-memory-${{ matrix.name }}-ubuntu.json \
+            2>&1 \
+            > target/nextest/perf-memory-${{ matrix.name }}-report.md
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          command: clippy
-          args: -- -D warnings
-      - name: Run cargo clippy no default features
-        uses: actions-rs/cargo@v1
+          name: reports-${{ matrix.name }}-${{ matrix.os }}
+          path: target/nextest/
+          retention-days: 7
+
+  goose-load-tests:
+    name: Goose load tests
+    runs-on: ubuntu-latest
+    needs: [tests]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
         with:
-          command: clippy
-          args: --examples -- -D warnings
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-goose-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Goose load tests (capture output)
+        run: |
+          mkdir -p target/goose
+          cargo test --test goose_header_load_test -- --test-threads=1 --nocapture 2>&1 | tee target/goose/goose-stdout.log
+      - name: Generate goose report
+        run: |
+          mkdir -p target/goose
+          bash hack/goose-report.sh --output target/goose/goose-report.json < target/goose/goose-stdout.log > target/goose/goose-report.md
+      - name: Upload goose reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: goose-reports
+          path: target/goose/
+          retention-days: 7
+
+  generate-reports:
+    name: Generate test reports
+    runs-on: ubuntu-latest
+    needs: [tests, goose-load-tests]
+    if: always()
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      # Download all nextest artifact groups
+      - name: Download nextest reports (default, ubuntu)
+        uses: actions/download-artifact@v4
+        with:
+          name: reports-default-ubuntu-latest
+          path: reports/default-ubuntu/
+      - name: Download nextest reports (client, ubuntu)
+        uses: actions/download-artifact@v4
+        if: always()
+        with:
+          name: reports-client-ubuntu-latest
+          path: reports/client-ubuntu/
+      - name: Download nextest reports (default, windows)
+        uses: actions/download-artifact@v4
+        if: always()
+        with:
+          name: reports-default-windows-latest
+          path: reports/default-windows/
+      - name: Download nextest reports (client, windows)
+        uses: actions/download-artifact@v4
+        if: always()
+        with:
+          name: reports-client-windows-latest
+          path: reports/client-windows/
+
+      # Download goose reports
+      - name: Download goose reports
+        uses: actions/download-artifact@v4
+        if: always()
+        with:
+          name: goose-reports
+          path: reports/goose/
+
+      # Generate combined markdown report
+      - name: Build combined report
+        id: report
+        shell: bash
+        run: |
+          OUT="target/reports/combined.md"
+          mkdir -p target/reports
+
+          echo "## Test Report" > "$OUT"
+          echo "" >> "$OUT"
+
+          # --- Nextest: Unit Tests ---
+          for cfg in "default-ubuntu" "client-ubuntu" "default-windows" "client-windows"; do
+            echo "---" >> "$OUT"
+            echo "### Unit Tests ($cfg)" >> "$OUT"
+            echo "" >> "$OUT"
+            f="reports/$cfg/unit-*-report.md"
+            if ls reports/$cfg/unit-*-report.md >/dev/null 2>&1; then
+              cat reports/$cfg/unit-*-report.md >> "$OUT"
+            else
+              echo "Skipped (no unit test artifacts)" >> "$OUT"
+            fi
+            echo "" >> "$OUT"
+
+            # Integration tests (client only, ubuntu only)
+            if [[ "$cfg" == "client-ubuntu" ]]; then
+              echo "### Integration Tests ($cfg)" >> "$OUT"
+              echo "" >> "$OUT"
+              if ls reports/$cfg/integration-*-report.md >/dev/null 2>&1; then
+                cat reports/$cfg/integration-*-report.md >> "$OUT"
+              else
+                echo "Skipped (no integration test artifacts)" >> "$OUT"
+              fi
+              echo "" >> "$OUT"
+            fi
+          done
+
+          # --- Goose Load Test Report ---
+          echo "---" >> "$OUT"
+          echo "### Load Tests" >> "$OUT"
+          echo "" >> "$OUT"
+          if [[ -f "reports/goose/goose-report.md" ]]; then
+            cat reports/goose/goose-report.md >> "$OUT"
+          else
+            echo "Skipped (no goose report found)" >> "$OUT"
+          fi
+          echo "" >> "$OUT"
+
+          # Also generate JSON report
+          python3 hack/nextest-report.py \
+            --title "Combined Test Report" \
+            --output-json target/reports/combined.json \
+            reports/default-ubuntu/unit-default-ubuntu-latest.json \
+            reports/client-ubuntu/unit-client-ubuntu-latest.json \
+            reports/default-windows/unit-default-windows-latest.json \
+            reports/client-windows/unit-client-windows-latest.json \
+            2>&1 \
+            > target/reports/summary.md || true
+
+      # Upload combined reports
+      - name: Upload combined reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-reports
+          path: |
+            target/reports/combined.md
+            target/reports/combined.json
+            target/reports/summary.md
+          retention-days: 7
+
+      # Post PR comment (PR events only)
+      - name: Post PR comment with reports
+        if: github.event.pull_request != null
+        run: |
+          set -x
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          
+          if [[ ! -f target/reports/combined.md ]]; then
+            echo "⚠️ Report generation failed" > /tmp/pr-body.md
+          else
+            # Truncate if too long (GitHub PR comment limit is ~65536 chars)
+            head -c 50000 target/reports/combined.md > /tmp/pr-body.md
+          fi
+          
+          # Check for existing bot comment and update, otherwise create
+          COMMENT_ID=$(gh api repos/${{ github.repository }}/issues/${PR_NUMBER}/comments \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("## Test Report"))) | .id' \
+            2>&1 | head -1)
+          
+          if [[ -n "$COMMENT_ID" ]]; then
+            gh api repos/${{ github.repository }}/issues/comments/${COMMENT_ID} \
+              --method PATCH \
+              --field body="$(cat /tmp/pr-body.md)" \
+              2>&1
+            echo "Updated existing PR comment $COMMENT_ID"
+          else
+            gh api repos/${{ github.repository }}/issues/${PR_NUMBER}/comments \
+              --field body="$(cat /tmp/pr-body.md)" \
+              2>&1
+            echo "Created new PR comment for PR $PR_NUMBER"
+          fi
+
+  ci-summary:
+    name: CI summary
+    runs-on: ubuntu-latest
+    needs: [lints, tests, goose-load-tests, generate-reports]
+    if: always()
+    steps:
+      - name: Write summary
+        run: |
+          echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lints | ${{ needs.lints.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Goose load tests | ${{ needs.goose-load-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Generate reports | ${{ needs.generate-reports.result }} |" >> $GITHUB_STEP_SUMMARY

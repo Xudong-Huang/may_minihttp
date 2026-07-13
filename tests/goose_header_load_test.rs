@@ -5,18 +5,19 @@
 //!
 //! ## Test Strategy
 //!
-//! - Uses Docker testcontainers for isolated test environment
-//! - RAII pattern ensures proper cleanup
-//! - Tests against the same container image used in GitHub Actions
+//! - In-process MAY server on a dedicated OS thread (RAII fixture)
+//! - Dynamic port allocation prevents conflicts between scenarios
 //! - Simulates realistic traffic patterns (browsers, load balancers, APIs)
-//! - Dynamic port allocation prevents conflicts
 
 use bytes::BufMut;
+use goose::config::GooseConfiguration;
 use goose::prelude::*;
-use may_minihttp::{HttpServer, HttpService, Request, Response};
+use gumdrop::Options;
+use may_minihttp::{HttpServerWithHeaders, HttpService, Request, Response};
 use std::io;
 use std::net::TcpListener;
-use std::sync::Once;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Once};
 use std::thread;
 use std::time::Duration;
 
@@ -107,10 +108,6 @@ impl HttpService for TestService {
 
         let header_count = req.headers().len();
 
-        // Enable keep-alive to prevent connection drops
-        res.header("Connection: keep-alive");
-        res.header("Keep-Alive: timeout=5, max=1000");
-
         // Build a simple response - just "OK" to minimize data transfer
         let response = format!("OK:{}", header_count);
 
@@ -154,81 +151,64 @@ fn ensure_port_available(preferred_port: u16) -> u16 {
     }
 }
 
-/// RAII fixture for Goose load testing
-///
-/// This fixture uses dynamic port allocation to prevent conflicts and can be
-/// extended to use testcontainers for full isolation, matching the exact
-/// environment used in GitHub Actions CI.
-///
-/// ## Port Management
-///
-/// Automatically finds an available port if the preferred port is in use,
-/// ensuring tests never fail due to port conflicts.
+/// RAII fixture for Goose load testing with dynamic port allocation.
 struct GooseTestFixture {
     port: u16,
-    handle: Option<may::coroutine::JoinHandle<()>>,
+    shutdown: Arc<AtomicBool>,
+    server_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl GooseTestFixture {
-    /// Create a new test fixture with port availability checking
-    ///
-    /// # Arguments
-    ///
-    /// * `preferred_port` - The preferred port to use (will find alternative if unavailable)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let fixture = GooseTestFixture::new(19001);
-    /// // Uses port 19001, or next available port if busy
-    /// ```
     fn new(preferred_port: u16) -> Self {
-        // CRITICAL: Initialize MAY runtime configuration FIRST (once for all tests)
         init_may_runtime();
 
-        // Check port availability and find alternative if needed
         let port = ensure_port_available(preferred_port);
 
-        // Start the HTTP server in the MAIN THREAD (not a background thread)
-        // This matches BRRTRouter's pattern exactly:
-        // - HttpServer.start() spawns a coroutine and returns immediately
-        // - The JoinHandle keeps the server running
-        // - No thread::spawn needed - MAY handles concurrency with coroutines
-        let handle = HttpServer(TestService)
-            .start(&format!("127.0.0.1:{}", port))
-            .expect("Failed to start test server");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+        let addr = format!("127.0.0.1:{}", port);
+        let server_thread = thread::spawn(move || {
+            let handle = HttpServerWithHeaders::<TestService, 32>(TestService)
+                .start(&addr)
+                .expect("Failed to start test server");
+
+            while !shutdown_clone.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            unsafe {
+                handle.coroutine().cancel();
+            }
+            let _ = handle.join();
+        });
 
         let fixture = Self {
             port,
-            handle: Some(handle),
+            shutdown,
+            server_thread: Some(server_thread),
         };
 
-        // Wait for server to be ready to accept connections
         if !fixture.wait_for_ready(50) {
             panic!("Server failed to start on port {}", port);
         }
 
+        thread::sleep(Duration::from_millis(100));
         eprintln!("[GOOSE] GooseTestFixture started server on port {}", port);
 
         fixture
     }
 
-    /// Wait for server to be ready to accept connections
-    ///
-    /// This sends an actual HTTP request to verify the server is responsive,
-    /// not just listening.
     fn wait_for_ready(&self, max_attempts: u32) -> bool {
         use std::io::{Read, Write};
         use std::net::TcpStream as StdTcpStream;
 
         for attempt in 0..max_attempts {
             if let Ok(mut stream) = StdTcpStream::connect(format!("127.0.0.1:{}", self.port)) {
-                // Send a minimal HTTP request
-                let request = format!("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+                let request = "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
                 if stream.write_all(request.as_bytes()).is_ok() {
-                    // Try to read some response
                     let mut buf = [0u8; 256];
                     if stream.read(&mut buf).is_ok() {
+                        let _ = stream.shutdown(std::net::Shutdown::Both);
                         eprintln!(
                             "[READY] Server on port {} is ready (attempt {})",
                             self.port,
@@ -261,12 +241,8 @@ impl GooseTestFixture {
 
 impl Drop for GooseTestFixture {
     fn drop(&mut self) {
-        // Cancel the server coroutine and wait for it to finish
-        // This matches BRRTRouter's ServerHandle::stop() implementation
-        if let Some(handle) = self.handle.take() {
-            unsafe {
-                handle.coroutine().cancel();
-            }
+        self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.server_thread.take() {
             let _ = handle.join();
         }
         eprintln!(
@@ -559,7 +535,8 @@ async fn test_goose_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[TEST] Starting Goose smoke test on {}", base_url);
 
     // Minimal Goose attack: 1 user, 1 second, simple transaction
-    let goose_attack = GooseAttack::initialize()?
+    let config = GooseConfiguration::parse_args_default::<String>(&[]).expect("config");
+    let goose_attack = GooseAttack::initialize_with_config(config)?
         .register_scenario(
             scenario!("Smoke Test").register_transaction(transaction!(request_with_5_headers)),
         )
@@ -589,7 +566,8 @@ async fn test_load_with_varying_headers() -> Result<(), Box<dyn std::error::Erro
     let base_url = fixture.base_url();
 
     // Configure Goose attack
-    let goose_attack = GooseAttack::initialize()?
+    let config = GooseConfiguration::parse_args_default::<String>(&[]).expect("config");
+    let goose_attack = GooseAttack::initialize_with_config(config)?
         .register_scenario(
             scenario!("Mixed Header Counts")
                 .register_transaction(transaction!(request_with_5_headers).set_weight(5)?)
@@ -619,7 +597,8 @@ async fn test_browser_traffic_load() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = GooseTestFixture::new(19002);
     let base_url = fixture.base_url();
 
-    let goose_attack = GooseAttack::initialize()?
+    let config = GooseConfiguration::parse_args_default::<String>(&[]).expect("config");
+    let goose_attack = GooseAttack::initialize_with_config(config)?
         .register_scenario(
             scenario!("Browser Traffic").register_transaction(transaction!(browser_like_request)),
         )
@@ -642,7 +621,8 @@ async fn test_load_balancer_traffic() -> Result<(), Box<dyn std::error::Error>> 
     let fixture = GooseTestFixture::new(19003);
     let base_url = fixture.base_url();
 
-    let goose_attack = GooseAttack::initialize()?
+    let config = GooseConfiguration::parse_args_default::<String>(&[]).expect("config");
+    let goose_attack = GooseAttack::initialize_with_config(config)?
         .register_scenario(
             scenario!("Load Balancer Traffic")
                 .register_transaction(transaction!(load_balancer_request)),
@@ -668,7 +648,8 @@ async fn test_high_header_count_stress() -> Result<(), Box<dyn std::error::Error
 
     // Test with progressively more headers to validate limit enforcement
     // This test EXPECTS some failures (20+ headers will fail with default limit of 16)
-    let goose_attack = GooseAttack::initialize()?
+    let config = GooseConfiguration::parse_args_default::<String>(&[]).expect("config");
+    let goose_attack = GooseAttack::initialize_with_config(config)?
         .register_scenario(
             scenario!("Progressive Header Increase")
                 .register_transaction(transaction!(request_with_16_headers).set_weight(3)?)
@@ -696,7 +677,8 @@ async fn test_load_with_large_header_values() -> Result<(), Box<dyn std::error::
     let base_url = fixture.base_url();
 
     // Test with various large header scenarios
-    let goose_attack = GooseAttack::initialize()?
+    let config = GooseConfiguration::parse_args_default::<String>(&[]).expect("config");
+    let goose_attack = GooseAttack::initialize_with_config(config)?
         .register_scenario(
             scenario!("Large Header Values")
                 .register_transaction(transaction!(request_with_large_user_agent).set_weight(3)?)
