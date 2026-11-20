@@ -8,7 +8,9 @@ mod buffer;
 mod client_impl;
 mod request;
 mod response;
+mod upgrade;
 
 pub use client_impl::HttpClient;
 pub use request::Request;
 pub use response::Response;
+pub use upgrade::{Upgrade, Upgraded};

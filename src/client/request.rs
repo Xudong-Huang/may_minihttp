@@ -123,6 +123,13 @@ impl Request {
     pub(crate) fn expect_body_request(&self) -> bool {
         self.expect_body
     }
+
+    /// Never send this request: its drop writes nothing.
+    pub(crate) fn abort(&mut self) {
+        if let BodyWriter::InvalidWriter = *self.body() {
+            *self.body_mut() = BodyWriter::EmptyWriter(self.writer.clone());
+        }
+    }
 }
 
 impl Deref for Request {
