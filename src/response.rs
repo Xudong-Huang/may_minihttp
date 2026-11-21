@@ -109,6 +109,8 @@ pub struct Response<'a> {
     status_message: StatusMessage,
     body: Body,
     rsp_buf: &'a mut BytesMut,
+    /// Set by [`Response::upgrade`]: once this 101 is written the connection runs it.
+    on_upgrade: Option<crate::upgrade::OnUpgrade>,
 }
 
 enum Body {
@@ -133,6 +135,7 @@ impl<'a> Response<'a> {
                 msg: "Ok",
             },
             rsp_buf,
+            on_upgrade: None,
         }
     }
 
@@ -166,6 +169,65 @@ impl<'a> Response<'a> {
         self.headers[self.headers_len] = header.into_response_header();
         self.headers_len += 1;
         self
+    }
+
+    /// Answer with `101 Switching Protocols` to `protocol`, and run `on_upgrade` on the connection
+    /// once the 101 is written.
+    ///
+    /// Sets the status, `Upgrade: <protocol>` and `Connection: Upgrade`; add any headers the
+    /// protocol needs (a WebSocket `Sec-WebSocket-Accept`) with [`Self::header`]. A body set on
+    /// this response is not sent: a 101 has none.
+    ///
+    /// The server writes the responses still queued for earlier pipelined requests, then this 101,
+    /// then calls `on_upgrade` with the [`Upgraded`](crate::Upgraded) connection on the
+    /// connection's own coroutine. HTTP is not parsed on the connection again; it closes when
+    /// `on_upgrade` returns. Checking that the request asked for this protocol (`Upgrade`,
+    /// `Connection: upgrade`, `Sec-WebSocket-Key`...) is the caller's.
+    ///
+    /// The connection does not switch, and closes after the response, when `call` returns an
+    /// error (its 500 is sent) or when the request has a body (`Content-Length` or
+    /// `Transfer-Encoding`; 400): an upgrade request carries none, and an unread body would be
+    /// taken for the new protocol's first bytes.
+    ///
+    /// ```ignore
+    /// fn call(&mut self, req: Request, rsp: &mut Response) -> io::Result<()> {
+    ///     let accept = websocket_accept(&req)?; // the caller's protocol check
+    ///     rsp.header(format!("Sec-WebSocket-Accept: {accept}"));
+    ///     rsp.upgrade("websocket", |conn| {
+    ///         let mut ws = tungstenite::WebSocket::from_raw_socket(conn, Role::Server, None);
+    ///         // ... frame messages on `ws` until the session ends
+    ///         Ok(())
+    ///     });
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn upgrade<F>(&mut self, protocol: &str, on_upgrade: F) -> &mut Self
+    where
+        F: FnOnce(crate::Upgraded<'_>) -> io::Result<()> + 'static,
+    {
+        self.status_message = StatusMessage {
+            code: 101,
+            msg: "Switching Protocols",
+        };
+        self.header(format!("Upgrade: {protocol}"));
+        self.header("Connection: Upgrade");
+        self.body = Body::Dummy;
+        self.rsp_buf.clear();
+        self.on_upgrade = Some(Box::new(on_upgrade));
+        self
+    }
+
+    /// `true` when [`Self::upgrade`] was called: the connection switches protocols after this
+    /// response.
+    #[inline]
+    pub fn is_upgrade(&self) -> bool {
+        self.on_upgrade.is_some()
+    }
+
+    /// The upgrade closure, taken by the server loop before the response is encoded.
+    #[inline]
+    pub(crate) fn take_upgrade(&mut self) -> Option<crate::upgrade::OnUpgrade> {
+        self.on_upgrade.take()
     }
 
     #[inline]
@@ -238,9 +300,13 @@ pub(crate) fn encode(mut rsp: Response, buf: &mut BytesMut) {
         buf.extend_from_slice(b"\r\nServer: M\r\nDate: ");
     }
     crate::date::append_date(buf);
-    buf.extend_from_slice(b"\r\nContent-Length: ");
-    let mut length = itoa::Buffer::new();
-    buf.extend_from_slice(length.format(rsp.body_len()).as_bytes());
+    // RFC 9110 §8.6: a 1xx response has no body, so no Content-Length either.
+    let switching = rsp.status_message.code == 101;
+    if !switching {
+        buf.extend_from_slice(b"\r\nContent-Length: ");
+        let mut length = itoa::Buffer::new();
+        buf.extend_from_slice(length.format(rsp.body_len()).as_bytes());
+    }
 
     // SAFETY: we already have bound check when insert headers
     let headers = unsafe { rsp.headers.get_unchecked(..rsp.headers_len) };
@@ -250,7 +316,9 @@ pub(crate) fn encode(mut rsp: Response, buf: &mut BytesMut) {
     }
 
     buf.extend_from_slice(b"\r\n\r\n");
-    buf.extend_from_slice(rsp.get_body());
+    if !switching {
+        buf.extend_from_slice(rsp.get_body());
+    }
 }
 
 #[cold]

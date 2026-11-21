@@ -6,6 +6,7 @@ use std::net::ToSocketAddrs;
 
 use crate::request::{self, Request};
 use crate::response::{self, Response};
+use crate::upgrade::{OnUpgrade, Upgraded};
 
 #[cfg(unix)]
 use bytes::Buf;
@@ -91,6 +92,57 @@ pub trait HttpServiceFactory: Send + Sized + 'static {
 
 #[inline]
 #[cold]
+/// Whether a request declares a body (`Content-Length` above zero, or `Transfer-Encoding`).
+fn request_has_body(req: &Request) -> bool {
+    req.headers().iter().any(|h| {
+        (h.name.eq_ignore_ascii_case("content-length") && h.value.iter().any(|&b| b != b'0'))
+            || h.name.eq_ignore_ascii_case("transfer-encoding")
+    })
+}
+
+/// A service called [`Response::upgrade`]: write the responses queued for earlier pipelined
+/// requests and the 101, in order, then run the upgrade on the connection. HTTP is not read on it
+/// again; the connection closes when this returns.
+///
+/// No switch when `call` failed (its 500 is sent) or the request has a body (400: an unread body
+/// would be taken for the new protocol's first bytes); the connection closes after that response.
+fn upgrade(
+    stream: &mut TcpStream,
+    rsp: Response,
+    called: io::Result<()>,
+    has_body: bool,
+    on_upgrade: OnUpgrade,
+    mut rsp_buf: BytesMut,
+    mut req_buf: BytesMut,
+) -> io::Result<()> {
+    let switch = match called {
+        Ok(()) if !has_body => {
+            response::encode(rsp, &mut rsp_buf);
+            true
+        }
+        Ok(()) => {
+            drop(rsp);
+            rsp_buf.extend_from_slice(
+                b"HTTP/1.1 400 Bad Request\r\nServer: M\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+            false
+        }
+        Err(e) => {
+            drop(rsp);
+            eprintln!("service err = {e:?}");
+            response::encode_error(e, &mut rsp_buf);
+            false
+        }
+    };
+    stream.write_all(&rsp_buf)?;
+    stream.flush()?;
+    if !switch {
+        return Ok(());
+    }
+    let buffered = req_buf.split();
+    on_upgrade(Upgraded::new(stream, buffered))
+}
+
 pub(crate) fn err<T>(e: io::Error) -> io::Result<T> {
     Err(e)
 }
@@ -185,8 +237,13 @@ fn each_connection_loop_with_headers<T: HttpService, const N: usize>(
                 None => break,
             };
             reserve_buf(&mut rsp_buf);
+            let has_body = request_has_body(&req);
             let mut rsp = Response::new(&mut body_buf);
-            match service.call(req, &mut rsp) {
+            let called = service.call(req, &mut rsp);
+            if let Some(on_upgrade) = rsp.take_upgrade() {
+                return upgrade(stream, rsp, called, has_body, on_upgrade, rsp_buf, req_buf);
+            }
+            match called {
                 Ok(()) => response::encode(rsp, &mut rsp_buf),
                 Err(e) => {
                     eprintln!("service err = {e:?}");
@@ -238,8 +295,13 @@ fn each_connection_loop_with_headers<T: HttpService, const N: usize>(
                     Some(req) => req,
                     None => break,
                 };
+                let has_body = request_has_body(&req);
                 let mut rsp = Response::new(&mut body_buf);
-                match service.call(req, &mut rsp) {
+                let called = service.call(req, &mut rsp);
+                if let Some(on_upgrade) = rsp.take_upgrade() {
+                    return upgrade(stream, rsp, called, has_body, on_upgrade, rsp_buf, req_buf);
+                }
+                match called {
                     Ok(()) => response::encode(rsp, &mut rsp_buf),
                     Err(e) => {
                         eprintln!("service err = {:?}", e);
